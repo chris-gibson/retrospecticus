@@ -1,0 +1,32 @@
+# Expects the executable from `bun scripts/build.ts` at /usr/local/bin/retrospecticus, with vec0.so beside it.
+# Create the user first: useradd --system --home-dir /var/lib/retrospecticus --shell /usr/sbin/nologin retrospecticus
+# /etc/retrospecticus holds config.json and secrets.json. Make it owned by that user, mode 700,
+# so the admin page can save settings: install -d -o retrospecticus -g retrospecticus -m 700 /etc/retrospecticus
+[Unit]
+Description=Retrospecticus server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=retrospecticus
+Group=retrospecticus
+StateDirectory=retrospecticus
+ExecStart=/usr/local/bin/retrospecticus --config /etc/retrospecticus/config.json serve
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/retrospecticus /etc/retrospecticus
+
+[Install]
+WantedBy=multi-user.target

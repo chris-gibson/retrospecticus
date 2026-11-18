@@ -1,0 +1,123 @@
+[
+  {
+    "source": "claude-code",
+    "version": "2.1.258",
+    "path": "claude-code/2.1.258/00000000-0000-4000-8000-000000000001.jsonl",
+    "role": "main",
+    "lines": 398,
+    "truncatedFromLines": 1143,
+    "bytes": 347540
+  },
+  {
+    "source": "claude-code",
+    "version": "2.1.325",
+    "path": "claude-code/2.1.325/00000000-0000-4000-8000-00000000018f.jsonl",
+    "role": "main",
+    "lines": 197,
+    "bytes": 283785
+  },
+  {
+    "source": "claude-code",
+    "version": "2.1.325",
+    "path": "claude-code/2.1.325/00000000-0000-4000-8000-00000000018f/subagents/agent-fake000565.jsonl",
+    "role": "subagent",
+    "lines": 116,
+    "bytes": 228896
+  },
+  {
+    "source": "claude-code",
+    "version": "2.1.325",
+    "path": "claude-code/2.1.325/00000000-0000-4000-8000-0000000002d0.jsonl",
+    "role": "main",
+    "lines": 57,
+    "bytes": 134744
+  },
+  {
+    "source": "claude-code",
+    "version": "2.1.258",
+    "path": "claude-code/2.1.258/coverage.jsonl",
+    "role": "coverage",
+    "lines": 28,
+    "bytes": 18479
+  },
+  {
+    "source": "claude-code",
+    "version": "2.1.325",
+    "path": "claude-code/2.1.325/coverage.jsonl",
+    "role": "coverage",
+    "lines": 61,
+    "bytes": 83662
+  },
+  {
+    "source": "claude-code",
+    "version": "2.1.325",
+    "path": "claude-code/2.1.325/coverage-intermediate.jsonl",
+    "role": "coverage",
+    "lines": 18,
+    "bytes": 12029
+  },
+  {
+    "source": "codex",
+    "version": "0.153.4",
+    "path": "codex/0.153.4/rollout-2001-01-08T00-00-00-00000000-0000-4000-8000-000000000001.jsonl",
+    "role": "main",
+    "lines": 108,
+    "bytes": 98036
+  },
+  {
+    "source": "codex",
+    "version": "0.153.4",
+    "path": "codex/0.153.4/rollout-2001-01-09T00-00-00-00000000-0000-4000-8000-00000000005e.jsonl",
+    "role": "guardian",
+    "lines": 69,
+    "bytes": 89267
+  },
+  {
+    "source": "codex",
+    "version": "0.153.4",
+    "path": "codex/0.153.4/rollout-2001-01-10T00-00-00-00000000-0000-4000-8000-000000000081.jsonl",
+    "role": "main",
+    "lines": 37,
+    "bytes": 53274
+  },
+  {
+    "source": "codex",
+    "version": "0.169.0",
+    "path": "codex/0.169.0/rollout-2001-01-11T00-00-00-00000000-0000-4000-8000-00000000009c.jsonl",
+    "role": "main",
+    "lines": 425,
+    "bytes": 318619
+  },
+  {
+    "source": "codex",
+    "version": "0.169.0",
+    "path": "codex/0.169.0/rollout-2001-01-12T00-00-00-00000000-0000-4000-8000-0000000001e9.jsonl",
+    "role": "spawned",
+    "lines": 148,
+    "bytes": 139348
+  },
+  {
+    "source": "codex",
+    "version": "0.153.4",
+    "path": "codex/0.153.4/coverage.jsonl",
+    "role": "coverage",
+    "lines": 39,
+    "bytes": 110499
+  },
+  {
+    "source": "codex",
+    "version": "0.169.0",
+    "path": "codex/0.169.0/coverage.jsonl",
+    "role": "coverage",
+    "lines": 36,
+    "bytes": 30099
+  },
+  {
+    "source": "codex",
+    "version": "0.169.0",
+    "path": "codex/0.169.0/coverage-intermediate.jsonl",
+    "role": "coverage",
+    "lines": 2,
+    "bytes": 1263
+  }
+]

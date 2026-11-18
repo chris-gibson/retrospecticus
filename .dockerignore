@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+.git
+fixtures
+docs
+**/test
+*.sqlite*
+# Keep server secrets and local config out of the build context and the image.
+**/secrets.json
+**/retrospecticus-config

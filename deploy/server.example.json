@@ -1,0 +1,35 @@
+{
+  "data_dir": "/var/lib/retrospecticus",
+  "listen_host": "192.168.1.10",
+  "listen_port": 7878,
+  "indexer": {
+    "poll_seconds": 2,
+    "yield_min_lines": 200,
+    "chunk_tokens": 400,
+    "chunk_overlap_tokens": 50
+  },
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "base_url": "https://api.openai.com/v1",
+    "query_prefix": "",
+    "document_prefix": "",
+    "dimensions": 1536
+  },
+  "search": {
+    "keyword_weight": 2,
+    "vector_weight": 1
+  },
+  "alerts": {
+    "collector_silent_hours": 48,
+    "embedding_backlog_chunks": 5000,
+    "digest_hour": 8
+  },
+  "notifiers": {
+    "discord": {},
+    "email": {
+      "from": "retrospecticus@example.com",
+      "to": ["me@example.com"]
+    }
+  }
+}

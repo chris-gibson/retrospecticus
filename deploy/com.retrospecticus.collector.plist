@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- `retrospecticus-collector install` (or `enroll`) writes this for you; this
+     template is for running from a source checkout instead of the binary.
+     Install to ~/Library/LaunchAgents/ and load with:
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.retrospecticus.collector.plist
+     launchd does not expand ~ or $HOME: replace every /Users/YOU and each /REPLACE/... path below.
+     Create ~/Library/Logs first if it is missing. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.retrospecticus.collector</string>
+  <key>ProgramArguments</key>
+  <array>
+    <!-- REPLACE: absolute path to bun (see `which bun`). -->
+    <string>/opt/homebrew/bin/bun</string>
+    <!-- REPLACE: absolute path to the checkout. -->
+    <string>/REPLACE/retrospecticus/packages/collector/src/main.ts</string>
+    <string>--config</string>
+    <string>/Users/YOU/.config/retrospecticus/collector.json</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/Library/Logs/retrospecticus-collector.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/Library/Logs/retrospecticus-collector.err.log</string>
+</dict>
+</plist>

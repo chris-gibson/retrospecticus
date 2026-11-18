@@ -1,0 +1,19 @@
+{
+  "server_url": "http://192.168.1.10:7878",
+  "token_file": "~/.config/retrospecticus/ingest-token",
+  "machine": "my-laptop",
+  "poll_seconds": 30,
+  "state_file": "~/.local/state/retrospecticus/collector-state.json",
+  "sources": [
+    { "name": "claude-code", "root": "~/.claude/projects", "glob": "**/*.jsonl" },
+    { "name": "codex", "root": "~/.codex/sessions", "glob": "**/*.jsonl" }
+  ],
+  "watch": true,
+  "watch_debounce_ms": 500,
+  "backoff_min_ms": 1000,
+  "backoff_max_ms": 300000,
+  "heartbeat_seconds": 300,
+  "request_timeout_seconds": 120,
+  "max_body_bytes": 8388608,
+  "status_page": { "enabled": true, "port": 7879 }
+}

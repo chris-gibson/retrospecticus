@@ -1,0 +1,3 @@
+[install]
+# A new release must be 72 hours old before it can be resolved, so a compromised publish is likely caught and pulled first.
+minimumReleaseAge = 259200

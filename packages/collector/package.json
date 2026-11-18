@@ -1,0 +1,10 @@
+{
+  "name": "@retrospecticus/collector",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./*": "./src/*" },
+  "bin": { "retrospecticus-collector": "./src/main.ts" },
+  "dependencies": { "@retrospecticus/shared": "workspace:*", "zod": "^4" }
+}

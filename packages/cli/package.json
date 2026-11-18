@@ -1,0 +1,10 @@
+{
+  "name": "@retrospecticus/cli",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./*": "./src/*" },
+  "bin": { "retrospecticus": "./src/main.ts" },
+  "dependencies": { "@retrospecticus/shared": "workspace:*", "@retrospecticus/server": "workspace:*" }
+}

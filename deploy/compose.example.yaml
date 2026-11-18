@@ -1,0 +1,30 @@
+# Copy this file to the server as compose.yaml, then: docker compose pull && docker compose up -d
+services:
+  retrospecticus:
+    # Published by the release workflow for linux/amd64 and linux/arm64. Pin a version (e.g. :0.1.0) to
+    # update deliberately.
+    image: ghcr.io/chris-gibson/retrospecticus:latest
+    # To build from a checkout instead, replace `image` with `build: ..` and run `docker compose up -d --build`.
+    # A fixed name, so admin commands can use `docker exec retrospecticus ...` from any directory.
+    container_name: retrospecticus
+    restart: unless-stopped
+    ports:
+      # Published on one private address only, never on 0.0.0.0. Set it in .env next to this file, e.g.
+      # RETROSPECTICUS_BIND=192.168.1.10 (LAN), a Tailscale IP, or another overlay's address. See Networking in the README.
+      - "${RETROSPECTICUS_BIND:?set RETROSPECTICUS_BIND in .env to the private address to publish on}:7878:7878"
+    # Only if the server must reach machines by names that just your private network's DNS knows (e.g. Ollama on another box):
+    # dns:
+    #   - 192.168.1.1        # your resolver; 100.100.100.100 for Tailscale
+    #   - 1.1.1.1            # fallback when it is down
+    # The server runs as this user, so the data directory on the host must be writable by it.
+    user: "1000:1000"
+    volumes:
+      # The data directory is a plain host directory, so the host's backup covers raw/ directly.
+      - /srv/retrospecticus/data:/var/lib/retrospecticus
+      # Holds config.json and secrets.json. Mounted read-write because the admin UI and
+      # `retrospecticus secrets set` rewrite them; on the host the directory must be owned by
+      # 1000:1000 with mode 700 (mkdir -m 700 retrospecticus-config && chown 1000:1000 retrospecticus-config).
+      # Keep it out of the data directory's backups: secrets.json holds the API key and webhook URLs.
+      # Start with the directory empty: the image defaults to listening on every interface inside the
+      # container, and `docker logs retrospecticus` shows a one-time link to the setup page.
+      - ./retrospecticus-config:/etc/retrospecticus

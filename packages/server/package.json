@@ -1,0 +1,10 @@
+{
+  "name": "@retrospecticus/server",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./*": "./src/*" },
+  "dependencies": { "@retrospecticus/shared": "workspace:*", "@modelcontextprotocol/sdk": "^1", "hono": "^4", "nodemailer": "^10.3.1", "sqlite-vec": "^0.1.9", "zod": "^4" },
+  "devDependencies": { "@types/nodemailer": "^8.0.2" }
+}

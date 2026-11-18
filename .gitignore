@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
+*.local.toml
+deploy/compose.yaml
+deploy/retrospecticus-config/

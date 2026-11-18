@@ -1,0 +1,85 @@
+# Publishes a version when its tag is pushed:
+#   - the collector executables, on a GitHub release (servers hand new machines the
+#     collector from the release matching their own version);
+#   - the server image for linux/amd64 and linux/arm64, on GitHub Container Registry.
+#   git tag v0.1.0 && git push origin v0.1.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+
+      - run: bun install --frozen-lockfile
+
+      - name: Check the tag matches VERSION
+        run: |
+          version=$(bun -e 'import { VERSION } from "./packages/shared/src/index.ts"; console.log(VERSION)')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match VERSION $version in packages/shared/src/index.ts" >&2
+            exit 1
+          fi
+
+      - name: Check the third-party notices are current
+        run: bun scripts/third-party-notices.ts --check
+
+      - run: bun run typecheck
+      - run: bun test
+
+      - name: Build the collectors
+        run: bun scripts/build.ts --out dist --server none
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/collectors/* LICENSE THIRD_PARTY_NOTICES.md --title "$GITHUB_REF_NAME" --generate-notes
+
+  image:
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      # The Dockerfile cross-compiles in a stage on the runner's own platform and its final stage has no RUN,
+      # so building arm64 on this x64 runner needs no emulation.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

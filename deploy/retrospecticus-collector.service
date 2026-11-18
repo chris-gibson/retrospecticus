@@ -1,0 +1,17 @@
+# `retrospecticus-collector install` (or `enroll`) writes this for you; this
+# template is for running from a source checkout instead of the binary.
+# Systemd user unit. Install to ~/.config/systemd/user/ and run:
+#   systemctl --user enable --now retrospecticus-collector
+# Adjust /opt/retrospecticus (install dir) and /usr/local/bin/bun (bun path) to match this machine.
+# Run `loginctl enable-linger $USER` to keep it running while logged out.
+[Unit]
+Description=Retrospecticus collector
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/bun /opt/retrospecticus/packages/collector/src/main.ts --config %h/.config/retrospecticus/collector.json
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
