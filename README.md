@@ -13,6 +13,7 @@ A small collector on each machine pushes new bytes of session files to the serve
 ## Requirements
 
 - The server runs on Linux (x64 or arm64), in Docker (the published image) or directly. It is a single executable with SQLite and `sqlite-vec` built in or alongside; nothing else needs installing.
+- **There is no macOS server executable:** on macOS, Bun uses the system SQLite, which cannot load the `sqlite-vec` extension. To host the server on a Mac, run the Docker image (Docker Desktop runs the Linux image, arm64 on Apple Silicon). Collectors run natively on macOS either way.
 - Collectors run on Linux and macOS (x64 and arm64), also as single executables.
 - A private network that every machine and the server share: a LAN, Tailscale, WireGuard or another overlay. The server speaks plain HTTP and relies on tokens, so it must never be reachable from the internet. See [Networking](#networking).
 - Building from source needs Bun 1.4 or newer.
@@ -119,7 +120,7 @@ sudo install -m 755 retrospecticus /usr/local/bin/retrospecticus
 sudo install -m 644 vec0.so /usr/local/bin/vec0.so
 ```
 
-To build it yourself instead: clone the repository, then `bun install` and `bun scripts/build.ts --collectors none`, which writes `dist/server/retrospecticus` and `dist/server/vec0.so` for the machine you build on. The server runs on Linux only; on macOS, Bun's SQLite cannot load extensions.
+To build it yourself instead: clone the repository, then `bun install` and `bun scripts/build.ts --collectors none`, which writes `dist/server/retrospecticus` and `dist/server/vec0.so` for the machine you build on. The server runs on Linux only (see [Requirements](#requirements) for macOS).
 
 Create the service user and the config directory, which the user must own so the admin page can save settings:
 
