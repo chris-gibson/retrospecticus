@@ -1,5 +1,5 @@
 # Publishes a version when its tag is pushed:
-#   - the collector executables, on a GitHub release (servers hand new machines the
+#   - the collector executables and the server for Linux (x64, arm64), on a GitHub release (servers hand new machines the
 #     collector from the release matching their own version);
 #   - the server image for linux/amd64 and linux/arm64, on GitHub Container Registry.
 #   git tag v0.1.0 && git push origin v0.1.0
@@ -40,6 +40,22 @@ jobs:
 
       - name: Build the collectors
         run: bun scripts/build.ts --out dist --server none
+
+      # The server loads sqlite-vec's library from beside it, so each Linux CPU needs that package installed.
+      - name: Fetch sqlite-vec for every Linux CPU
+        run: bun install --frozen-lockfile --os=linux --cpu='*'
+
+      - name: Build and package the server
+        run: |
+          for arch in x64 arm64; do
+            bun scripts/build.ts --out "build-$arch" --collectors none --server "linux-$arch"
+            name="retrospecticus-server-linux-$arch"
+            mkdir -p "pkg/$name"
+            cp "build-$arch/server/retrospecticus" "build-$arch/server/vec0.so" LICENSE THIRD_PARTY_NOTICES.md \
+              deploy/retrospecticus-server.service deploy/server.example.json "pkg/$name/"
+            tar -C pkg -czf "dist/collectors/$name.tar.gz" "$name"
+          done
+          cd dist/collectors && sha256sum retrospecticus-server-*.tar.gz >> SHA256SUMS
 
       - name: Publish the release
         env:

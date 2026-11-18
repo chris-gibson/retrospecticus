@@ -3,7 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { registerTools, type ToolContext } from "./tools.ts";
 
 export const MCP_SERVER_NAME = "retrospecticus";
-export const MCP_SERVER_VERSION = "0.1.0";
+export const MCP_SERVER_VERSION = "0.1.1";
 
 export function createMcpServer(ctx: ToolContext): McpServer {
   const server = new McpServer({ name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION });

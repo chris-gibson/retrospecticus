@@ -12,7 +12,7 @@
     },
     "packages/cli": {
       "name": "@retrospecticus/cli",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "bin": {
         "retrospecticus": "./src/main.ts",
       },
@@ -23,7 +23,7 @@
     },
     "packages/collector": {
       "name": "@retrospecticus/collector",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "bin": {
         "retrospecticus-collector": "./src/main.ts",
       },
@@ -34,7 +34,7 @@
     },
     "packages/server": {
       "name": "@retrospecticus/server",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1",
         "@retrospecticus/shared": "workspace:*",
@@ -49,7 +49,7 @@
     },
     "packages/shared": {
       "name": "@retrospecticus/shared",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "zod": "^4",
       },

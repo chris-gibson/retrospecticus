@@ -107,15 +107,19 @@ To update, run `docker compose pull && docker compose up -d` in `<deploy-dir>`. 
 
 ## Running the server without Docker
 
-Build the executable on the server (or on any machine with the same CPU type) and install it with `sqlite-vec` beside it:
+Each release has the server for Linux as `retrospecticus-server-linux-x64.tar.gz` and `retrospecticus-server-linux-arm64.tar.gz`: the executable, `sqlite-vec` (`vec0.so`, which must stay beside it), the systemd unit, an example config, `LICENSE` and the third-party notices. Download the one for the server's CPU (`uname -m`: `x86_64` is x64, `aarch64` is arm64), check it and install it:
 
 ```sh
-git clone <repository-url> <install-dir> && cd <install-dir>
-bun install
-bun scripts/build.ts --collectors none
-sudo install -m 755 dist/server/retrospecticus /usr/local/bin/retrospecticus
-sudo install -m 644 dist/server/vec0.so /usr/local/bin/vec0.so
+v=0.1.1 arch=x64
+base=https://github.com/chris-gibson/retrospecticus/releases/download/v$v
+curl -fsSLO "$base/retrospecticus-server-linux-$arch.tar.gz" -O "$base/SHA256SUMS"
+sha256sum --ignore-missing -c SHA256SUMS
+tar -xzf "retrospecticus-server-linux-$arch.tar.gz" && cd "retrospecticus-server-linux-$arch"
+sudo install -m 755 retrospecticus /usr/local/bin/retrospecticus
+sudo install -m 644 vec0.so /usr/local/bin/vec0.so
 ```
+
+To build it yourself instead: clone the repository, then `bun install` and `bun scripts/build.ts --collectors none`, which writes `dist/server/retrospecticus` and `dist/server/vec0.so` for the machine you build on. The server runs on Linux only; on macOS, Bun's SQLite cannot load extensions.
 
 Create the service user and the config directory, which the user must own so the admin page can save settings:
 
@@ -125,10 +129,10 @@ sudo install -d -o retrospecticus -g retrospecticus -m 700 /etc/retrospecticus
 echo '{ "listen_host": "<server-address>" }' | sudo -u retrospecticus tee /etc/retrospecticus/config.json
 ```
 
-`listen_host` defaults to `127.0.0.1` so the server never listens publicly by accident; set it to the server's address on your private network (see [Networking](#networking)). Then install `deploy/retrospecticus-server.service` (read it first), start it, and open the setup link from `journalctl -u retrospecticus-server`:
+`listen_host` defaults to `127.0.0.1` so the server never listens publicly by accident; set it to the server's address on your private network (see [Networking](#networking)). Then install `retrospecticus-server.service` from the package (or `deploy/` in the repository; read it first), start it, and open the setup link from `journalctl -u retrospecticus-server`:
 
 ```sh
-sudo cp deploy/retrospecticus-server.service /etc/systemd/system/
+sudo cp retrospecticus-server.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now retrospecticus-server
 ```
@@ -397,7 +401,7 @@ Pushing a version tag publishes the collector executables:
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-`.github/workflows/release.yml` checks that the tag matches `VERSION` in `packages/shared/src/index.ts`, runs the type check and the tests, builds the four collectors and attaches them with `SHA256SUMS` to a GitHub release, then publishes the server image for linux/amd64 and linux/arm64 to `ghcr.io/chris-gibson/retrospecticus` as `<version>`, `<major>.<minor>` and `latest`. The image's build stage cross-compiles and its final stage runs no commands, so both platforms build on an x64 runner without emulation. A server hands new machines the collector from the release matching its own `VERSION`, so bump `VERSION`, rebuild the server and tag together.
+`.github/workflows/release.yml` checks that the tag matches `VERSION` in `packages/shared/src/index.ts`, runs the type check and the tests, builds the four collectors and attaches them, the Linux server packages (x64 and arm64) and `SHA256SUMS` to a GitHub release, then publishes the server image for linux/amd64 and linux/arm64 to `ghcr.io/chris-gibson/retrospecticus` as `<version>`, `<major>.<minor>` and `latest`. The image's build stage cross-compiles and its final stage runs no commands, so both platforms build on an x64 runner without emulation. A server hands new machines the collector from the release matching its own `VERSION`, so bump `VERSION`, rebuild the server and tag together.
 
 ## Command reference
 

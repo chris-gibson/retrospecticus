@@ -60,6 +60,8 @@ function collect(): Pkg[] {
         throw err;
       }
       const meta = readJson(join(pkgDir, "package.json"));
+      // Which per-CPU sqlite-vec package is installed depends on the machine; the sqlite-vec entry covers them all.
+      if (/^sqlite-vec-/.test(meta.name)) continue;
       const key = `${meta.name}@${meta.version}`;
       if (found.has(key)) continue;
       found.set(key, { name: meta.name, version: meta.version, license: licenseOf(meta), dir: pkgDir });
@@ -121,7 +123,7 @@ The server and collector executables are built with \`bun build --compile\`, whi
 
 ## Other files in the container image
 
-- \`/usr/local/lib/retrospecticus/vec0.so\` is sqlite-vec, listed with the npm packages below. Its per-platform packages (\`sqlite-vec-linux-x64\`, \`sqlite-vec-linux-arm64\` and so on) carry the same code and license; the one listed is the one installed where this file was generated.
+- \`/usr/local/lib/retrospecticus/vec0.so\` is sqlite-vec, listed with the npm packages below. Its per-platform packages (\`sqlite-vec-linux-x64\`, \`sqlite-vec-linux-arm64\` and so on) carry the same code and license; they are covered by the sqlite-vec entry.
 - \`/etc/ssl/certs/ca-certificates.crt\` is the Mozilla CA certificate bundle as packaged by Debian's \`ca-certificates\`, under the Mozilla Public License 2.0 (source: https://salsa.debian.org/debian/ca-certificates and https://hg.mozilla.org/projects/nss).
 - The base image is \`debian:bookworm-slim\`; the license of each Debian package in it is in \`/usr/share/doc/<package>/copyright\` inside the image.
 `;

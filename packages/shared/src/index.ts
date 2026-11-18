@@ -4,7 +4,7 @@ import { z } from "zod";
  * The release version of every package. A server hands out collectors of its
  * own version, and the release workflow refuses a tag that does not match.
  */
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";
 
 export const SOURCES = ["claude-code", "codex"] as const;
 export type Source = (typeof SOURCES)[number];

@@ -16,7 +16,7 @@ The server and collector executables are built with `bun build --compile`, which
 
 ## Other files in the container image
 
-- `/usr/local/lib/retrospecticus/vec0.so` is sqlite-vec, listed with the npm packages below. Its per-platform packages (`sqlite-vec-linux-x64`, `sqlite-vec-linux-arm64` and so on) carry the same code and license; the one listed is the one installed where this file was generated.
+- `/usr/local/lib/retrospecticus/vec0.so` is sqlite-vec, listed with the npm packages below. Its per-platform packages (`sqlite-vec-linux-x64`, `sqlite-vec-linux-arm64` and so on) carry the same code and license; they are covered by the sqlite-vec entry.
 - `/etc/ssl/certs/ca-certificates.crt` is the Mozilla CA certificate bundle as packaged by Debian's `ca-certificates`, under the Mozilla Public License 2.0 (source: https://salsa.debian.org/debian/ca-certificates and https://hg.mozilla.org/projects/nss).
 - The base image is `debian:bookworm-slim`; the license of each Debian package in it is in `/usr/share/doc/<package>/copyright` inside the image.
 
@@ -109,7 +109,6 @@ The server and collector executables are built with `bun build --compile`, which
 | side-channel-map | 1.0.1 | MIT |
 | side-channel-weakmap | 1.0.2 | MIT |
 | sqlite-vec | 0.1.9 | MIT OR Apache |
-| sqlite-vec-linux-x64 | 0.1.9 | MIT OR Apache |
 | statuses | 2.0.2 | MIT |
 | toidentifier | 1.0.1 | MIT |
 | type-is | 2.1.0 | MIT |
@@ -2322,34 +2321,6 @@ SOFTWARE.
 ```
 
 ### sqlite-vec 0.1.9
-
-```
-MIT License
-
-Copyright (c) 2024 Alex Garcia
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-(Licensed MIT OR Apache-2.0; Apache-2.0 text: https://github.com/asg017/sqlite-vec/blob/v0.1.9/LICENSE-APACHE)
-```
-
-### sqlite-vec-linux-x64 0.1.9
 
 ```
 MIT License
