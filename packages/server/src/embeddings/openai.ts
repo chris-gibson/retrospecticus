@@ -18,6 +18,8 @@ export interface OpenAIProviderOptions {
   baseUrl?: string;
   /** Sends no Authorization header when no key is set, for local OpenAI-compatible servers such as Ollama. */
   keyOptional?: boolean;
+  /** The secret named in "key missing" errors. */
+  keySecret?: string;
   /** The slug prefix and the name used in errors; "openai" unless another service speaks the same API. */
   provider?: string;
   /** One delay per retry; a 429 or 5xx after the last one is an error. */
@@ -114,6 +116,7 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): EmbeddingP
   const batchSize = options.batchSize ?? OPENAI_BATCH_SIZE;
   const doFetch = options.fetch ?? fetch;
   const provider = options.provider ?? "openai";
+  const keySecret = options.keySecret ?? "embedding_api_key";
   const sleep = options.sleep ?? defaultSleep;
   const now = options.now ?? Date.now;
 
@@ -122,7 +125,7 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): EmbeddingP
     if (key !== undefined && key !== "") return key;
     if (options.keyOptional) return undefined;
     throw new OpenAIEmbeddingError(
-      `${provider} embeddings need the secret embedding_api_key, which is not set; run \`retrospecticus secrets set embedding_api_key\``,
+      `${provider} embeddings need the secret ${keySecret}, which is not set; run \`retrospecticus secrets set ${keySecret}\``,
       { kind: "auth" },
     );
   }
@@ -138,6 +141,8 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): EmbeddingP
           headers,
           body: JSON.stringify({ model, input }),
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          // A redirect would carry the key to wherever it points.
+          redirect: "error",
         });
       } catch (error) {
         const delay = retryDelays[attempt];

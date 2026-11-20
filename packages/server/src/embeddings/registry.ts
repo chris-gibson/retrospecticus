@@ -1,14 +1,22 @@
 import type { ServerConfig } from "../config.ts";
-import { noSecrets, type SecretReader } from "../secrets.ts";
+import { noSecrets, type SecretName, type SecretReader } from "../secrets.ts";
 import { createFakeProvider } from "./fake.ts";
 import { createOpenAIProvider } from "./openai.ts";
 import type { EmbeddingProvider } from "./types.ts";
 
 export type EmbeddingConfig = ServerConfig["embedding"];
 
-const PROVIDERS = ["openai", "ollama", "fake"] as const;
+const PROVIDERS = ["openai", "ollama", "omlx", "fake"] as const;
 
 export const OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1";
+export const OMLX_BASE_URL = "http://127.0.0.1:8000/v1";
+/** oMLX keeps its own key, so switching providers never sends one service's key to the other. */
+export function apiKeySecret(provider: string): SecretName {
+  return provider === "omlx" ? "omlx_api_key" : "embedding_api_key";
+}
+
+export const OMLX_KEY_REQUIRED =
+  "oMLX needs its API key: copy it from the oMLX settings (or auth.api_key in ~/.omlx/settings.json) into the API token field";
 
 function build(
   provider: string,
@@ -17,7 +25,7 @@ function build(
   secrets: SecretReader,
   dimensions?: number,
 ): EmbeddingProvider {
-  const apiKey = () => secrets("embedding_api_key");
+  const apiKey = () => secrets(apiKeySecret(provider));
   switch (provider) {
     case "openai":
       return createOpenAIProvider({ model, apiKey, dimensions, baseUrl: config.base_url });
@@ -30,6 +38,17 @@ function build(
         keyOptional: true,
         dimensions,
         baseUrl: config.base_url ?? OLLAMA_BASE_URL,
+      });
+    case "omlx":
+      // oMLX rejects unauthenticated requests unless the operator turned that off, so the key is required here.
+      return createOpenAIProvider({
+        model,
+        provider: "omlx",
+        apiKey,
+        keyOptional: false,
+        keySecret: "omlx_api_key",
+        dimensions,
+        baseUrl: config.base_url ?? OMLX_BASE_URL,
       });
     case "fake":
       return createFakeProvider({ model, dimensions });

@@ -89,6 +89,7 @@ function checkConfigDir(configPath: string): Check {
 function checkNeededSecrets(config: ServerConfig, secrets: SecretsFile): Check[] {
   const needed: [SecretName, string][] = [];
   if (config.embedding.provider === "openai") needed.push(["embedding_api_key", "embedding.provider \"openai\""]);
+  if (config.embedding.provider === "omlx") needed.push(["omlx_api_key", "embedding.provider \"omlx\""]);
   if ("discord" in config.notifiers) needed.push(["discord_webhook_url", "notifiers.discord"]);
   if ("email" in config.notifiers) needed.push(["smtp_url", "notifiers.email"]);
   return needed.map(([name, what]) =>

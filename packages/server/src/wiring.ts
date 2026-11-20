@@ -4,7 +4,7 @@ import { toConfigView, type ConfigView } from "./config-store.ts";
 import type { Db } from "./db/index.ts";
 import { createDriftDetector } from "./drift/detector.ts";
 import { createYieldMonitor } from "./drift/yield.ts";
-import { createProvider } from "./embeddings/registry.ts";
+import { apiKeySecret, createProvider } from "./embeddings/registry.ts";
 import { createChunkStage } from "./indexer/chunk.ts";
 import { clearEmbedErrors, createEmbedStage, registerProvider } from "./indexer/embed.ts";
 import type { IndexerStage, LineObserver } from "./indexer/types.ts";
@@ -112,7 +112,7 @@ function createLiveEmbedStage(view: ConfigView): IndexerStage {
         stage = null;
         blocked = false;
         clearEmbedErrors(db);
-        lastApiKey = secrets("embedding_api_key");
+        lastApiKey = secrets(apiKeySecret(embedding.provider));
         try {
           const provider = createProvider(embedding, secrets);
           if (provider) {
@@ -126,7 +126,7 @@ function createLiveEmbedStage(view: ConfigView): IndexerStage {
       }
       if (blocked || !stage) return false;
       // A new key should be tried at once rather than after a long backoff.
-      const apiKey = secrets("embedding_api_key");
+      const apiKey = secrets(apiKeySecret(view.current().embedding.provider));
       if (apiKey !== lastApiKey) {
         lastApiKey = apiKey;
         stage.resetBackoff();

@@ -121,7 +121,7 @@ function advice(slug: string, kind: EmbedErrorKind): string {
     case "quota":
       return `Add credit with ${name} (for OpenAI: platform.openai.com, Settings, Billing).`;
     case "auth":
-      return "Check the embedding_api_key secret under Settings, or the provider's account.";
+      return "Check the provider's API key under Settings, Secrets (omlx_api_key for oMLX, embedding_api_key otherwise), or the provider's account.";
     default:
       return `Check ${name}'s status page and the embedding settings if this does not clear.`;
   }

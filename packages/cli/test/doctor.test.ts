@@ -59,6 +59,12 @@ describe("doctor", () => {
     expect(out.some((l) => l.includes("no machines enrolled yet"))).toBe(true);
   });
 
+  test("an oMLX embedding provider without its key warns", async () => {
+    writeConfig({ embedding: { provider: "omlx", model: "embeddinggemma-2-bf16", dimensions: 768 } });
+    const { out } = await doctor();
+    expect(out).toContain('warn embedding.provider "omlx" needs the secret omlx_api_key; run `retrospecticus secrets set omlx_api_key`');
+  });
+
   test("matching archive sizes pass", async () => {
     archiveFile("hello\n", 6);
     const { code, out } = await doctor();

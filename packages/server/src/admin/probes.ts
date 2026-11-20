@@ -5,7 +5,7 @@ import type { AppEnv } from "../auth.ts";
 import { parseConfig, type ConfigError } from "../config.ts";
 import type { ConfigView } from "../config-store.ts";
 import { OPENAI_BASE_URL, OPENAI_KNOWN_DIMENSIONS } from "../embeddings/openai.ts";
-import { OLLAMA_BASE_URL, createProvider, type EmbeddingConfig } from "../embeddings/registry.ts";
+import { OLLAMA_BASE_URL, OMLX_BASE_URL, OMLX_KEY_REQUIRED, apiKeySecret, createProvider, type EmbeddingConfig } from "../embeddings/registry.ts";
 import { readJsonBody } from "../enroll.ts";
 import { buildNotifiers } from "../notifiers/registry.ts";
 import type { Alert } from "../notifiers/types.ts";
@@ -93,15 +93,44 @@ async function withTimeout<T>(work: Promise<T>, ms: number, what: string): Promi
 }
 
 const TagsSchema = z.object({ base_url: z.string().min(1).max(2048) });
+const OmlxModelsSchema = z.object({ base_url: z.string().min(1).max(2048), api_key: z.string().max(8192).optional() });
 const EmbeddingTestSchema = z.object({ embedding: z.record(z.string(), z.unknown()), api_key: z.string().max(8192).optional() });
 const NotifierTestSchema = z.object({ name: z.string().min(1).max(100) });
+
+function sameEndpoint(a: string, b: string): boolean {
+  try {
+    const x = new URL(a);
+    const y = new URL(b);
+    return x.origin === y.origin && x.pathname.replace(/\/+$/, "") === y.pathname.replace(/\/+$/, "");
+  } catch {
+    return false;
+  }
+}
+
+function defaultBaseUrl(provider: string): string {
+  if (provider === "ollama") return OLLAMA_BASE_URL;
+  if (provider === "omlx") return OMLX_BASE_URL;
+  return OPENAI_BASE_URL;
+}
+
+/** OpenAI-style /models listing, whose entries carry the model name in `id`. */
+export function toOpenAIModels(body: unknown): OllamaModel[] {
+  const list = (body as { data?: unknown })?.data;
+  if (!Array.isArray(list)) return [];
+  const models: OllamaModel[] = [];
+  for (const item of list as Array<Record<string, unknown>>) {
+    if (typeof item?.id !== "string") continue;
+    models.push({ name: item.id, embedding: EMBEDDING_NAME.test(item.id), capabilities: null });
+  }
+  return models.sort((a, b) => Number(b.embedding) - Number(a.embedding) || a.name.localeCompare(b.name));
+}
 
 /**
  * Learns an unlisted model's size from one request, so the real provider,
  * which needs to know it up front, can then be built.
  */
 async function probeDimensions(config: EmbeddingConfig, key: string | undefined, timeoutMs: number): Promise<number> {
-  const base = config.base_url ?? (config.provider === "ollama" ? OLLAMA_BASE_URL : OPENAI_BASE_URL);
+  const base = config.base_url ?? defaultBaseUrl(config.provider);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (key) headers.Authorization = `Bearer ${key}`;
   const response = await fetch(`${base.replace(/\/+$/, "")}/embeddings`, {
@@ -123,7 +152,7 @@ async function probeDimensions(config: EmbeddingConfig, key: string | undefined,
 
 function needsProbe(config: EmbeddingConfig): boolean {
   return (
-    (config.provider === "openai" || config.provider === "ollama") &&
+    (config.provider === "openai" || config.provider === "ollama" || config.provider === "omlx") &&
     config.dimensions === undefined &&
     OPENAI_KNOWN_DIMENSIONS[config.model] === undefined
   );
@@ -152,6 +181,45 @@ export function registerProbeRoutes(app: Hono<AppEnv>, deps: ProbeDeps): void {
     }
   });
 
+  // A saved key only goes back to the oMLX address it was configured for; a new address needs its key typed in,
+  // so editing the address field cannot send the stored key somewhere else.
+  const savedOmlxKey = (baseUrl: string | undefined): string | undefined => {
+    const saved = view.current().embedding;
+    if (saved.provider !== "omlx") return undefined;
+    const sameAddress = sameEndpoint(saved.base_url ?? OMLX_BASE_URL, baseUrl ?? OMLX_BASE_URL);
+    return sameAddress ? view.getSecret("omlx_api_key") : undefined;
+  };
+
+  app.post(`${API}/omlx/models`, async (c) => {
+    const body = OmlxModelsSchema.safeParse(await readJsonBody(c, deps.maxBodyBytes));
+    const base = body.success ? httpUrl(body.data.base_url) : null;
+    if (!body.success || !base) return c.json({ error: "base_url must be an http:// or https:// address" }, 400);
+    const key = body.data.api_key?.trim() || savedOmlxKey(body.data.base_url);
+    if (!key) return c.json({ error: OMLX_KEY_REQUIRED }, 400);
+    base.pathname = `${base.pathname.replace(/\/+$/, "")}/models`;
+    base.search = "";
+    base.hash = "";
+    try {
+      const response = await fetch(base, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(tagsTimeout),
+        redirect: "error",
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        const reason =
+          response.status === 401 || response.status === 403
+            ? `oMLX rejected the API key (${response.status}) at ${base.origin}; check it against the oMLX settings`
+            : `oMLX answered ${response.status} at ${base.origin}`;
+        return c.json({ error: reason }, 502);
+      }
+      return c.json({ models: toOpenAIModels(await response.json()) });
+    } catch (err) {
+      const reason = (err as Error).name === "TimeoutError" ? `no answer within ${tagsTimeout / 1000} s` : (err as Error).message;
+      return c.json({ error: errorSnippet(`cannot reach oMLX at ${base.origin}: ${reason}`, [key]) }, 502);
+    }
+  });
+
   app.post(`${API}/test/embedding`, async (c) => {
     const body = EmbeddingTestSchema.safeParse(await readJsonBody(c, deps.maxBodyBytes));
     if (!body.success) return c.json({ error: "send { embedding, api_key? }" }, 400);
@@ -167,13 +235,16 @@ export function registerProbeRoutes(app: Hono<AppEnv>, deps: ProbeDeps): void {
     }
     // The candidate key is used for this request only and never stored.
     const candidateKey = body.data.api_key?.trim() || undefined;
-    const secrets = (name: SecretName) => (name === "embedding_api_key" ? candidateKey ?? view.getSecret(name) : view.getSecret(name));
-    const redact = [candidateKey, view.getSecret("embedding_api_key")];
+    const keyName = apiKeySecret(config.provider);
+    const savedKey = config.provider === "omlx" ? savedOmlxKey(config.base_url) : view.getSecret(keyName);
+    const secrets = (name: SecretName) => (name === keyName ? candidateKey ?? savedKey : view.getSecret(name));
+    const redact = [candidateKey, view.getSecret("embedding_api_key"), view.getSecret("omlx_api_key")];
+    if (config.provider === "omlx" && !secrets(keyName)) return c.json({ error: OMLX_KEY_REQUIRED }, 400);
     const started = performance.now();
     try {
       let probed = false;
       if (needsProbe(config)) {
-        const key = secrets("embedding_api_key");
+        const key = secrets(keyName);
         if (config.provider === "openai" && !key) throw new Error("set an API key to test OpenAI embeddings");
         config = { ...config, dimensions: await probeDimensions(config, key, embedTimeout) };
         probed = true;
@@ -199,7 +270,8 @@ export function registerProbeRoutes(app: Hono<AppEnv>, deps: ProbeDeps): void {
     } catch (err) {
       const e = err as Error;
       const reason = e.name === "TimeoutError" ? `no answer within ${embedTimeout / 1000} s` : e.message;
-      return c.json({ error: errorSnippet(reason, redact) }, 502);
+      const rejected = config.provider === "omlx" && /returned 40[13]\b/.test(reason);
+      return c.json({ error: errorSnippet(rejected ? "oMLX rejected the API key; check it against the oMLX settings" : reason, redact) }, 502);
     }
   });
 

@@ -58,6 +58,7 @@ describe("loading", () => {
     expect(store.secretsPath).toBe(secretsPath);
     expect(store.secretStatus()).toEqual({
       embedding_api_key: { set: false, updated_at: null },
+      omlx_api_key: { set: false, updated_at: null },
       discord_webhook_url: { set: false, updated_at: null },
       smtp_url: { set: false, updated_at: null },
       github_token: { set: false, updated_at: null },

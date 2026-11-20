@@ -15,6 +15,7 @@ import { activateModel, getModel, listModels } from "../db/vectors.ts";
 import { getEmbedError } from "../indexer/embed.ts";
 import { readJsonBody } from "../enroll.ts";
 import { events } from "../events.ts";
+import { OMLX_KEY_REQUIRED } from "../embeddings/registry.ts";
 import { isSecretName } from "../secrets.ts";
 
 const API = `${ADMIN_PAGE_PATH}/api`;
@@ -84,6 +85,10 @@ export function registerSettingsRoutes(app: Hono<AppEnv>, deps: SettingsDeps): v
     if (!body.success) return c.json({ error: "send { config, version }" }, 400);
     const issues = settingsIssues(body.data.config);
     if (issues.length > 0) return c.json({ error: "some settings are not valid", issues }, 400);
+    const embedding = (body.data.config as { embedding?: { provider?: unknown } } | null)?.embedding;
+    if (embedding?.provider === "omlx" && !view.getSecret("omlx_api_key")) {
+      return c.json({ error: "some settings are not valid", issues: [{ path: "embedding.provider", message: OMLX_KEY_REQUIRED }] }, 400);
+    }
     try {
       const version = store.update(body.data.config as z.input<typeof ServerConfigSchema>, body.data.version);
       events.publish("settings");

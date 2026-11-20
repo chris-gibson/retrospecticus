@@ -32,6 +32,7 @@ describe("secrets", () => {
     expect(code).toBe(0);
     expect(out).toEqual([
       "embedding_api_key    unset",
+      "omlx_api_key         unset",
       "discord_webhook_url  unset",
       "smtp_url             unset",
       "github_token         unset",
@@ -56,7 +57,7 @@ describe("secrets", () => {
     const unset = await cli(["unset", "smtp_url"]);
     expect(unset.code).toBe(0);
     expect(JSON.parse(readFileSync(secretsPath, "utf8"))).toEqual({});
-    expect((await cli(["list"])).out[2]).toBe("smtp_url             unset");
+    expect((await cli(["list"])).out[3]).toBe("smtp_url             unset");
   });
 
   test("an empty value is refused and changes nothing", async () => {

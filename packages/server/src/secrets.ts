@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SECRET_NAMES = ["embedding_api_key", "discord_webhook_url", "smtp_url", "github_token"] as const;
+export const SECRET_NAMES = ["embedding_api_key", "omlx_api_key", "discord_webhook_url", "smtp_url", "github_token"] as const;
 export type SecretName = (typeof SECRET_NAMES)[number];
 
 export function isSecretName(name: string): name is SecretName {

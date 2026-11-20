@@ -26,6 +26,12 @@ beforeEach(() => {
       const url = new URL(req.url);
       const body: any = req.method === "POST" ? await req.json().catch(() => null) : null;
       requests.push({ path: url.pathname, auth: req.headers.get("Authorization"), body });
+      if (url.pathname.startsWith("/omlx/") && req.headers.get("Authorization") !== "Bearer omlx-key") {
+        return new Response("unauthorized", { status: 401 });
+      }
+      if (url.pathname === "/omlx/v1/models") {
+        return Response.json({ object: "list", data: [{ id: "llama-3.2-3b" }, { id: "embeddinggemma-2-bf16" }, { id: "bge-m3" }] });
+      }
       if (url.pathname === "/api/tags") {
         return Response.json({
           models: [
@@ -116,6 +122,83 @@ describe("Ollama model discovery", () => {
     const down = await post(ctx, "/admin/api/ollama/models", { base_url: "http://127.0.0.1:1/v1" });
     expect(down.status).toBe(502);
     expect(down.body.error).toContain("cannot reach Ollama");
+  });
+});
+
+const omlxBase = () => `${server.url.origin}/omlx/v1`;
+
+describe("oMLX", () => {
+  test("lists models from /v1/models with the bearer key, embedding models first", async () => {
+    const ctx = await signedIn();
+    const res = await post(ctx, "/admin/api/omlx/models", { base_url: omlxBase(), api_key: "omlx-key" });
+    expect(res.status).toBe(200);
+    expect(res.body.models.map((m: any) => m.name)).toEqual(["bge-m3", "embeddinggemma-2-bf16", "llama-3.2-3b"]);
+    expect(requests.map((r) => [r.path, r.auth])).toEqual([["/omlx/v1/models", "Bearer omlx-key"]]);
+  });
+
+  test("falls back to the saved oMLX key only for the address it was saved with", async () => {
+    const saved = { embedding: { provider: "omlx", model: "embeddinggemma-2-bf16", dimensions: 768, base_url: omlxBase() } };
+    const omlx = await signedIn(saved, { omlx_api_key: "omlx-key" });
+    expect((await post(omlx, "/admin/api/omlx/models", { base_url: `${omlxBase()}/` })).status).toBe(200);
+    expect(requests.map((r) => r.auth)).toEqual(["Bearer omlx-key"]);
+    requests.length = 0;
+    // An edited address is somewhere the saved key was never meant to go.
+    const elsewhere = omlxBase().replace("/omlx/", "/elsewhere/");
+    expect((await post(omlx, "/admin/api/omlx/models", { base_url: elsewhere })).status).toBe(400);
+    const moved = await post(omlx, "/admin/api/test/embedding", { embedding: { provider: "omlx", model: "embeddinggemma-2-bf16", base_url: elsewhere } });
+    expect(moved.status).toBe(400);
+    expect(requests).toEqual([]);
+    // An OpenAI key lives in its own secret and is never sent to oMLX.
+    const openai = await signedIn({ embedding: { provider: "openai", model: "text-embedding-3-small" } }, { embedding_api_key: "sk-openai" });
+    const list = await post(openai, "/admin/api/omlx/models", { base_url: omlxBase() });
+    expect(list.status).toBe(400);
+    expect(list.body.error).toContain("oMLX needs its API key");
+    const test = await post(openai, "/admin/api/test/embedding", { embedding: { provider: "omlx", model: "embeddinggemma-2-bf16", base_url: omlxBase() } });
+    expect(test.status).toBe(400);
+    expect(requests).toEqual([]);
+  });
+
+  test("rejects listing and testing without a key, before any request", async () => {
+    const ctx = await signedIn();
+    const list = await post(ctx, "/admin/api/omlx/models", { base_url: omlxBase() });
+    expect(list.status).toBe(400);
+    expect(list.body.error).toContain("oMLX needs its API key");
+    const test = await post(ctx, "/admin/api/test/embedding", { embedding: { provider: "omlx", model: "embeddinggemma-2-bf16", base_url: omlxBase() } });
+    expect(test.status).toBe(400);
+    expect(test.body.error).toContain("oMLX needs its API key");
+    expect(requests).toEqual([]);
+  });
+
+  test("a rejected key names oMLX", async () => {
+    const ctx = await signedIn();
+    const list = await post(ctx, "/admin/api/omlx/models", { base_url: omlxBase(), api_key: "wrong" });
+    expect(list.status).toBe(502);
+    expect(list.body.error).toContain("oMLX rejected the API key");
+    const test = await post(ctx, "/admin/api/test/embedding", {
+      embedding: { provider: "omlx", model: "embeddinggemma-2-bf16", base_url: omlxBase() },
+      api_key: "wrong",
+    });
+    expect(test.status).toBe(502);
+    expect(test.body.error).toContain("oMLX rejected the API key");
+  });
+
+  test("an unreachable oMLX and a non-http address are reported", async () => {
+    const ctx = await signedIn();
+    expect((await post(ctx, "/admin/api/omlx/models", { base_url: "file:///etc/passwd", api_key: "k" })).status).toBe(400);
+    const down = await post(ctx, "/admin/api/omlx/models", { base_url: "http://127.0.0.1:1/v1", api_key: "k" });
+    expect(down.status).toBe(502);
+    expect(down.body.error).toContain("cannot reach oMLX");
+  });
+
+  test("Test probes the dimensions and embeds with the key", async () => {
+    const ctx = await signedIn();
+    const res = await post(ctx, "/admin/api/test/embedding", {
+      embedding: { provider: "omlx", model: "embeddinggemma-2-bf16", base_url: omlxBase() },
+      api_key: "omlx-key",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ slug: "omlx-embeddinggemma-2-bf16", dimensions: OLLAMA_DIMS, probed_dimensions: true });
+    expect(requests.every((r) => r.auth === "Bearer omlx-key")).toBe(true);
   });
 });
 

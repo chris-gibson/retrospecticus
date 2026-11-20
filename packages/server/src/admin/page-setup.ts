@@ -86,6 +86,7 @@ export const WIZARD_BODY = `
       <div class="choices" role="radiogroup">
         <label class="check"><input type="radio" name="wiz-provider" value="none" checked> None (keywords only)</label>
         <label class="check"><input type="radio" name="wiz-provider" value="ollama"> Ollama (local)</label>
+        <label class="check"><input type="radio" name="wiz-provider" value="omlx"> oMLX (local, Apple Silicon)</label>
         <label class="check"><input type="radio" name="wiz-provider" value="openai"> OpenAI</label>
       </div>
       <div id="wiz-ollama" class="hidden">
@@ -102,6 +103,28 @@ export const WIZARD_BODY = `
           <select id="wiz-ollama-model" class="hidden"></select>
           <input id="wiz-ollama-model-name" placeholder="e.g. nomic-embed-text" autocomplete="off" spellcheck="false">
           <p id="wiz-ollama-info" class="help">Find models lists what this Ollama has; embedding models come first. Picking one measures its size.</p>
+        </div>
+      </div>
+      <div id="wiz-omlx" class="hidden">
+        <div class="field">
+          <label for="wiz-omlx-url">oMLX address</label>
+          <div class="inline">
+            <input id="wiz-omlx-url" value="http://127.0.0.1:8000/v1" autocomplete="off" spellcheck="false">
+            <button id="wiz-omlx-find" type="button">Find models</button>
+          </div>
+          <p class="help">From inside Docker on macOS it is http://host.docker.internal:8000/v1.</p>
+        </div>
+        <div class="field">
+          <label for="wiz-omlx-key">API token (required)</label>
+          <input id="wiz-omlx-key" type="password" autocomplete="off" spellcheck="false" required>
+          <p id="wiz-omlx-key-status" class="help"></p>
+          <p class="help">oMLX rejects requests without its API key. Find it in the oMLX settings, or as auth.api_key in ~/.omlx/settings.json.</p>
+        </div>
+        <div class="field">
+          <label for="wiz-omlx-model">Model</label>
+          <select id="wiz-omlx-model" class="hidden"></select>
+          <input id="wiz-omlx-model-name" placeholder="e.g. embeddinggemma-2-bf16" autocomplete="off" spellcheck="false">
+          <p class="help">Find models lists what this oMLX serves; embedding models come first. Picking one measures its size.</p>
         </div>
       </div>
       <div id="wiz-openai" class="hidden">
@@ -283,7 +306,8 @@ export const SETUP_SCRIPT = `
 function installCommand() { return "curl -fsSL " + location.origin + "/install.sh | sh"; }
 const OPENAI_MODELS = ["text-embedding-3-small", "text-embedding-3-large"];
 const SECRET_INFO = {
-  embedding_api_key: ["Embedding API key", "Key for the embeddings API (needed for OpenAI; optional for Ollama)."],
+  embedding_api_key: ["Embedding API key", "Key for the embeddings API (required for OpenAI; optional for Ollama)."],
+  omlx_api_key: ["oMLX API key", "Required for oMLX: auth.api_key in ~/.omlx/settings.json, or the oMLX settings. Kept apart from the embedding API key so switching providers never sends one service's key to the other."],
   discord_webhook_url: ["Discord webhook URL", "Webhook alerts are posted to when notifiers.discord is on."],
   smtp_url: ["SMTP URL", "Mail server for email alerts, e.g. smtps://user:password@smtp.example.com:465."],
   github_token: ["GitHub token", "Only for a private fork: a read-only token for downloading its collector releases. Not needed for the public repository."],
@@ -296,7 +320,7 @@ const SUB_GROUPS = {
   alerts: ["Alerts"],
 };
 const SECRET_TARGETS = [
-  ["secrets-embedding", ["embedding_api_key"]],
+  ["secrets-embedding", ["embedding_api_key", "omlx_api_key"]],
   ["secrets-alerts", ["discord_webhook_url", "smtp_url"]],
   ["secrets-all", Object.keys(SECRET_INFO)],
 ];
@@ -325,13 +349,13 @@ const GROUPS = [
       help: "How much meaning-based (embedding) ranking counts. 0 makes search keyword only." },
   ] },
   { title: "Embedding", fields: [
-    { path: "embedding.provider", label: "Provider", type: "select", options: ["none", "ollama", "openai"],
-      labels: { none: "None (keyword search only)", ollama: "Ollama (your own hardware)", openai: "OpenAI" },
-      help: "Ollama runs on your own hardware; OpenAI needs the embedding API key secret. None turns meaning-based search off." },
+    { path: "embedding.provider", label: "Provider", type: "select", options: ["none", "ollama", "omlx", "openai"],
+      labels: { none: "None (keyword search only)", ollama: "Ollama (your own hardware)", omlx: "oMLX (local, Apple Silicon)", openai: "OpenAI" },
+      help: "Ollama and oMLX run on your own hardware; OpenAI and oMLX need the embedding API key secret. None turns meaning-based search off." },
     { path: "embedding.model", label: "Model", type: "model",
-      help: "A new model fills its own vectors; search moves to it when you activate it below. For Ollama, the name of a pulled embedding model, e.g. embeddinggemma-2." },
+      help: "A new model fills its own vectors; search moves to it when you activate it below. For Ollama or oMLX, the name of a pulled or loaded embedding model, e.g. embeddinggemma-2." },
     { path: "embedding.base_url", label: "API address", type: "text", optional: true,
-      help: "Leave empty for the provider's default (OpenAI, or http://127.0.0.1:11434/v1 for Ollama)." },
+      help: "Leave empty for the provider's default (OpenAI, http://127.0.0.1:11434/v1 for Ollama, or http://127.0.0.1:8000/v1 for oMLX)." },
     { path: "embedding.dimensions", label: "Dimensions", type: "int", optional: true,
       help: "Vector size. Only needed for a model the server does not know; the setup wizard's Test measures it." },
     { path: "embedding.query_prefix", label: "Query prefix", type: "prefix",
@@ -493,6 +517,7 @@ function wizProvider() {
 function showProviderFields() {
   const p = wizProvider();
   $("wiz-ollama").classList.toggle("hidden", p !== "ollama");
+  $("wiz-omlx").classList.toggle("hidden", p !== "omlx");
   $("wiz-openai").classList.toggle("hidden", p !== "openai");
   $("wiz-emb-test").classList.toggle("hidden", p === "none");
   say("wiz-emb-msg", "");
@@ -506,11 +531,16 @@ function secretHint(id, name, setText) {
 function fillEmbeddingStep() {
   ollamaDims = null;
   const e = wizSettings ? wizSettings.config.embedding : { provider: "none" };
-  const provider = ["none", "ollama", "openai"].includes(e.provider) ? e.provider : "none";
+  const provider = ["none", "ollama", "omlx", "openai"].includes(e.provider) ? e.provider : "none";
   for (const radio of document.querySelectorAll('input[name="wiz-provider"]')) radio.checked = radio.value === provider;
   if (provider === "ollama") {
     if (e.base_url) $("wiz-ollama-url").value = e.base_url;
     $("wiz-ollama-model-name").value = e.model;
+    ollamaDims = e.dimensions || null;
+  }
+  if (provider === "omlx") {
+    if (e.base_url) $("wiz-omlx-url").value = e.base_url;
+    $("wiz-omlx-model-name").value = e.model;
     ollamaDims = e.dimensions || null;
   }
   if (provider === "openai") {
@@ -518,9 +548,27 @@ function fillEmbeddingStep() {
     $("wiz-openai-url").value = e.base_url || "";
   }
   $("wiz-openai-key").value = "";
+  $("wiz-omlx-key").value = "";
+  if (omlxKeySaved()) secretHint("wiz-omlx-key-status", "omlx_api_key", "A token is already saved for this address; leave this empty to keep it");
+  else $("wiz-omlx-key-status").textContent = "Required.";
   secretHint("wiz-openai-key-status", "embedding_api_key", "A key is already saved; leave this empty to keep it");
   showProviderFields();
   if (!wizSettings) say("wiz-emb-msg", "This server has no config file, so settings cannot be saved here; skip this step.", "error");
+}
+
+const OMLX_KEY_MESSAGE = "oMLX needs its API key. Paste it into the API token field; it is in the oMLX settings, or as auth.api_key in ~/.omlx/settings.json.";
+
+// The server only reuses a saved key for the oMLX address it was configured with, so a changed address needs the key again.
+function omlxKeySaved() {
+  if (!wizSettings || !wizSettings.secrets.omlx_api_key || !wizSettings.secrets.omlx_api_key.set) return false;
+  const e = wizSettings.config.embedding;
+  if (e.provider !== "omlx") return false;
+  const norm = (u) => (u || "http://127.0.0.1:8000/v1").trim().replace(/[/]+$/, "").toLowerCase();
+  return norm(e.base_url) === norm($("wiz-omlx-url").value);
+}
+
+function omlxKeyMissing() {
+  return !$("wiz-omlx-key").value.trim() && !omlxKeySaved();
 }
 
 function ollamaModelName() { return $("wiz-ollama-model-name").value.trim(); }
@@ -529,6 +577,11 @@ function candidateEmbedding() {
   const p = wizProvider();
   if (p === "ollama") {
     const e = { provider: "ollama", model: ollamaModelName(), base_url: $("wiz-ollama-url").value.trim() };
+    if (ollamaDims) e.dimensions = ollamaDims;
+    return e;
+  }
+  if (p === "omlx") {
+    const e = { provider: "omlx", model: $("wiz-omlx-model-name").value.trim(), base_url: $("wiz-omlx-url").value.trim() };
     if (ollamaDims) e.dimensions = ollamaDims;
     return e;
   }
@@ -557,18 +610,39 @@ async function findOllamaModels() {
   } catch (err) { report("wiz-emb-msg", err); }
 }
 
+async function findOmlxModels() {
+  if (omlxKeyMissing()) return say("wiz-emb-msg", OMLX_KEY_MESSAGE, "error");
+  say("wiz-emb-msg", "Asking oMLX for its models...");
+  try {
+    const body = { base_url: $("wiz-omlx-url").value.trim() };
+    const key = $("wiz-omlx-key").value.trim();
+    if (key) body.api_key = key;
+    const res = await api("omlx/models", body);
+    const select = $("wiz-omlx-model");
+    if (!res.models.length) {
+      select.classList.add("hidden");
+      return say("wiz-emb-msg", "oMLX lists no models yet. Add an embedding model in oMLX, then try again.", "error");
+    }
+    select.replaceChildren(el("option", { value: "" }, "Choose a model..."),
+      ...res.models.map((m) => el("option", { value: m.name }, m.name + (m.embedding ? " (embedding)" : ""))));
+    select.classList.remove("hidden");
+    say("wiz-emb-msg", res.models.length + " model" + (res.models.length === 1 ? "" : "s") + " found.", "ok");
+  } catch (err) { report("wiz-emb-msg", err); }
+}
+
 async function testEmbedding(quiet) {
   const embedding = candidateEmbedding();
   if (embedding.provider === "none") return null;
+  if (embedding.provider === "omlx" && omlxKeyMissing()) { say("wiz-emb-msg", OMLX_KEY_MESSAGE, "error"); return null; }
   if (!embedding.model) { say("wiz-emb-msg", "Choose a model first.", "error"); return null; }
-  if (embedding.provider === "ollama") delete embedding.dimensions;
+  if (embedding.provider === "ollama" || embedding.provider === "omlx") delete embedding.dimensions;
   const body = { embedding };
-  const key = $("wiz-openai-key").value.trim();
-  if (embedding.provider === "openai" && key) body.api_key = key;
+  const key = (embedding.provider === "omlx" ? $("wiz-omlx-key") : $("wiz-openai-key")).value.trim();
+  if ((embedding.provider === "openai" || embedding.provider === "omlx") && key) body.api_key = key;
   say("wiz-emb-msg", "Embedding a test sentence...");
   try {
     const res = await api("test/embedding", body);
-    if (embedding.provider === "ollama") ollamaDims = res.dimensions;
+    if (embedding.provider === "ollama" || embedding.provider === "omlx") ollamaDims = res.dimensions;
     say("wiz-emb-msg", (quiet ? "" : "Works: ") + res.slug + " gives " + res.dimensions + " dimensions in " + res.latency_ms + " ms.", "ok");
     return res;
   } catch (err) { report("wiz-emb-msg", err); return null; }
@@ -593,10 +667,19 @@ async function saveConfig(mutate, msgId) {
 
 async function saveEmbeddingStep() {
   const embedding = candidateEmbedding();
-  if (embedding.provider === "ollama" && !embedding.model) { say("wiz-emb-msg", "Choose a model, or pick None.", "error"); return false; }
-  if (embedding.provider === "ollama" && !ollamaDims) {
+  const local = embedding.provider === "ollama" || embedding.provider === "omlx";
+  if (embedding.provider === "omlx" && omlxKeyMissing()) { say("wiz-emb-msg", OMLX_KEY_MESSAGE, "error"); return false; }
+  if (local && !embedding.model) { say("wiz-emb-msg", "Choose a model, or pick None.", "error"); return false; }
+  if (local && !ollamaDims) {
     if (!(await testEmbedding(true))) return false;
     embedding.dimensions = ollamaDims;
+  }
+  if (embedding.provider === "omlx") {
+    const omlxKey = $("wiz-omlx-key").value.trim();
+    if (omlxKey) {
+      try { await api("secrets/omlx_api_key", { value: omlxKey }); $("wiz-omlx-key").value = ""; }
+      catch (err) { report("wiz-emb-msg", err); return false; }
+    }
   }
   const key = $("wiz-openai-key").value.trim();
   if (embedding.provider === "openai") {
@@ -1061,7 +1144,7 @@ function embeddingErrorBanner(err) {
   if (err.kind === "quota") {
     text = provider + " refused: no credits remaining. Add credit at platform.openai.com \u2192 Settings \u2192 Billing. Embedding paused; next try at " + at + ". Search still works with keywords.";
   } else if (err.kind === "auth") {
-    text = "The provider rejected the API key" + code + ". Check the embedding_api_key secret. Next try at " + at + ".";
+    text = "The provider rejected the API key" + code + ". Check the API key under Secrets (omlx_api_key for oMLX). Next try at " + at + ".";
   } else {
     const what = err.kind === "rate_limit" ? "rate limiting" : "unavailable";
     text = provider + " is " + what + code + ". Retrying at " + at + " (attempt " + (err.consecutive_failures + 1) + "). New chunks wait; search still works with keywords.";
@@ -1098,6 +1181,20 @@ $("wiz-ollama-model").addEventListener("change", (e) => {
 });
 $("wiz-ollama-model-name").addEventListener("input", () => { ollamaDims = null; });
 $("wiz-ollama-url").addEventListener("input", () => { ollamaDims = null; });
+$("wiz-omlx-find").addEventListener("click", findOmlxModels);
+$("wiz-omlx-model").addEventListener("change", (e) => {
+  if (!e.target.value) return;
+  $("wiz-omlx-model-name").value = e.target.value;
+  ollamaDims = null;
+  testEmbedding(false);
+});
+$("wiz-omlx-model-name").addEventListener("input", () => { ollamaDims = null; });
+$("wiz-omlx-url").addEventListener("input", () => {
+  ollamaDims = null;
+  if (omlxKeySaved()) secretHint("wiz-omlx-key-status", "omlx_api_key", "A token is already saved for this address; leave this empty to keep it");
+  else $("wiz-omlx-key-status").textContent = "Required.";
+});
+$("wiz-omlx-key").addEventListener("input", () => { ollamaDims = null; });
 $("wiz-emb-test").addEventListener("click", () => testEmbedding(false));
 $("wiz-discord-on").addEventListener("change", showAlertFields);
 $("wiz-email-on").addEventListener("change", showAlertFields);

@@ -100,6 +100,20 @@ describe("POST /admin/api/settings", () => {
     expect((await getSettings()).pending_restart).toEqual(["listen_port"]);
   });
 
+  test("oMLX cannot be saved without its own key, even with an OpenAI key saved", async () => {
+    const { config, version } = await getSettings();
+    config.embedding = { provider: "omlx", model: "embeddinggemma-2-bf16", dimensions: 768 };
+    const refused = await adminPost(app, "/admin/api/settings", cookie, { config, version });
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(await refused.json())).toContain("oMLX needs its API key");
+    expect(store.current().embedding.provider).toBe("none");
+    expect((await adminPost(app, "/admin/api/secrets/embedding_api_key", cookie, { value: "sk-openai" })).status).toBe(200);
+    expect((await adminPost(app, "/admin/api/settings", cookie, { config, version })).status).toBe(400);
+    expect((await adminPost(app, "/admin/api/secrets/omlx_api_key", cookie, { value: "omlx-key" })).status).toBe(200);
+    expect((await adminPost(app, "/admin/api/settings", cookie, { config, version })).status).toBe(200);
+    expect(store.current().embedding.provider).toBe("omlx");
+  });
+
   test("409 with both versions when the file changed meanwhile", async () => {
     const { config, version } = await getSettings();
     writeFileSync(join(dir, "config.json"), JSON.stringify({ data_dir: h.dataDir, listen_port: 0, search: { vector_weight: 4 } }));
@@ -235,6 +249,7 @@ describe("every new endpoint needs a session and passes the CSRF guard", () => {
     ["/admin/api/secrets/smtp_url/unset", {}],
     ["/admin/api/embedding/activate", { slug: "fake-a", force: true }],
     ["/admin/api/ollama/models", { base_url: "http://127.0.0.1:1/v1" }],
+    ["/admin/api/omlx/models", { base_url: "http://127.0.0.1:1/v1" }],
     ["/admin/api/test/embedding", { embedding: { provider: "fake" } }],
     ["/admin/api/test/notifier", { name: "log" }],
   ];

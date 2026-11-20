@@ -65,7 +65,7 @@ The image holds only the compiled server executable and `sqlite-vec` on `debian:
 The setup page walks through:
 
 1. **Your admin token.** Shown once; save it (Copy or Download). It signs you in to `/admin` from then on.
-2. **Embeddings.** None (keyword search only), Ollama or OpenAI. For Ollama, **Find models** lists what is installed and **Test** measures the model's dimensions. For OpenAI, paste the API key. See [Embeddings](#embeddings).
+2. **Embeddings.** None (keyword search only), Ollama, oMLX or OpenAI. For Ollama and oMLX, **Find models** lists what is installed and **Test** measures the model's dimensions; oMLX also needs its API key. For OpenAI, paste the API key. See [Embeddings](#embeddings).
 3. **Alerts.** Discord and/or email, with **Send test alert**.
 4. **Connect agents.** Creates a search token and shows the MCP configuration for Claude Code and Codex with your server's address and the token filled in.
 5. **Add your first machine.** Shows the one-line install command for this server (`curl -fsSL http://<server>:7878/install.sh | sh`) and approves the code it prints; see [Enrolling a machine](#enrolling-a-machine). The same command is on the **Machines** tab later.
@@ -190,7 +190,7 @@ The server reads `config.json` (path from `--config`, then `$RETROSPECTICUS_CONF
 | `indexer.poll_seconds` | `2` | Seconds between indexer passes. |
 | `indexer.yield_min_lines` | `200` | Lines a day needs before the yield monitor judges it. |
 | `indexer.chunk_tokens`, `chunk_overlap_tokens` | `400`, `50` | Chunk size for search; see [Ranking](#ranking). |
-| `embedding.provider` | `none` | `none`, `ollama` or `openai`. |
+| `embedding.provider` | `none` | `none`, `ollama`, `omlx` or `openai`. |
 | `embedding.model`, `dimensions`, `base_url` | | See [Embeddings](#embeddings). |
 | `embedding.query_prefix`, `document_prefix` | per model | Task prompts; see below. |
 | `search.keyword_weight`, `vector_weight` | `2`, `1` | Hybrid ranking weights. |
@@ -201,7 +201,7 @@ The server reads `config.json` (path from `--config`, then `$RETROSPECTICUS_CONF
 | `drift.ignore_types` | `{"claude-code": [], "codex": []}` | Record types (parser discriminators such as `system/stop_hook_summary`, no `[...]` suffix) to treat as bookkeeping and skip. Lines of an unknown type listed here are not quarantined and raise no drift. Normally set with **Ignore this type** on the admin page. |
 | `notifiers.discord`, `notifiers.email` | off | See [Alerts](#alerts). |
 
-`secrets.json` (mode 600; the server warns and `doctor` fails if it is readable by others) holds `embedding_api_key`, `discord_webhook_url`, `smtp_url` and `github_token`. Secrets are read when used, so a changed value applies at once. Set them on the admin page or with `retrospecticus secrets set <name>` (value on standard input), list them with `secrets list` (values are never printed), and remove them with `secrets unset <name>`. They never go in the database or the data directory.
+`secrets.json` (mode 600; the server warns and `doctor` fails if it is readable by others) holds `embedding_api_key`, `omlx_api_key`, `discord_webhook_url`, `smtp_url` and `github_token`. Secrets are read when used, so a changed value applies at once. Set them on the admin page or with `retrospecticus secrets set <name>` (value on standard input), list them with `secrets list` (values are never printed), and remove them with `secrets unset <name>`. They never go in the database or the data directory.
 
 ## Enrolling a machine
 
@@ -283,9 +283,22 @@ Keyword search works with no embeddings and is the default (`"provider": "none"`
 
 `dimensions` is required for Ollama models; the wizard measures it. `base_url` defaults to `http://127.0.0.1:11434/v1`, which inside Docker is the container itself. When Ollama runs on the Docker host, use `http://host.docker.internal:11434/v1` with `extra_hosts: ["host.docker.internal:host-gateway"]` in the compose file, and make Ollama listen beyond loopback (`OLLAMA_HOST=0.0.0.0`; keep port 11434 firewalled from everything but the container).
 
+**oMLX** (MLX inference server for Apple Silicon):
+
+```json
+"embedding": {
+  "provider": "omlx",
+  "model": "embeddinggemma-2-bf16",
+  "dimensions": 768,
+  "base_url": "http://host.docker.internal:8000/v1"
+}
+```
+
+Unlike Ollama, oMLX needs an API key: it rejects unauthenticated requests by default. Copy it from the oMLX settings (or `auth.api_key` in `~/.omlx/settings.json`) into the API token field in the wizard, or store it with `retrospecticus secrets set omlx_api_key`. It is kept apart from `embedding_api_key`, so switching between OpenAI and oMLX never sends one service's key to the other, and **Find models** and **Test** reuse the saved key only for the oMLX address it was saved with. The wizard, the settings check and `doctor` all treat the key as required. `base_url` defaults to `http://127.0.0.1:8000/v1`; from Docker on macOS use `http://host.docker.internal:8000/v1`. `dimensions` is required in a hand-written config (768 for EmbeddingGemma); the wizard measures it.
+
 EmbeddingGemma models are trained with task prompts, so the server adds them automatically: `task: search result | query: ` before each search and `title: none | text: ` before each chunk. Override them with `query_prefix` and `document_prefix` (`""` turns one off). The document prefix is stored with the model's vectors; if it changes, embedding pauses with an error rather than mixing vectors made two ways. Run `retrospecticus embedding drop <slug>` and the server re-embeds everything with the new prefix, with search on keywords alone until that finishes.
 
-**When the provider fails.** On a rate limit (429) or a server error the request is retried a few times, waiting as long as the provider's `Retry-After` or rate-limit reset headers ask (at most 60 seconds each). If it still fails, embedding pauses and retries on its own: after 30 seconds, then 1, 2, 5 and 10 minutes, and every 10 minutes after that. "Out of credit" (`insufficient_quota`) and rejected keys (401/403) are not retried within the request and are tried again every 15 minutes; saving a new `embedding_api_key` retries at once. One log line is written per failure with the time of the next try. **Settings → Embedding** shows the failure, the next attempt and what to do. Keyword search keeps working throughout; new chunks just wait for their vectors. The first failure of a quota or key problem raises a warning alert; a rate limit or outage raises one only after 30 minutes. An info alert notes when embedding resumes.
+**When the provider fails.** On a rate limit (429) or a server error the request is retried a few times, waiting as long as the provider's `Retry-After` or rate-limit reset headers ask (at most 60 seconds each). If it still fails, embedding pauses and retries on its own: after 30 seconds, then 1, 2, 5 and 10 minutes, and every 10 minutes after that. "Out of credit" (`insufficient_quota`) and rejected keys (401/403) are not retried within the request and are tried again every 15 minutes; saving a new `embedding_api_key` (or `omlx_api_key`) retries at once. One log line is written per failure with the time of the next try. **Settings → Embedding** shows the failure, the next attempt and what to do. Keyword search keeps working throughout; new chunks just wait for their vectors. The first failure of a quota or key problem raises a warning alert; a rate limit or outage raises one only after 30 minutes. An info alert notes when embedding resumes.
 
 **Changing model.** When the configured model changes, the server starts embedding everything with the new one in the background while search keeps using the old one. **Settings → Embedding** shows the progress and an **Activate** button once it is complete. From the command line:
 
@@ -294,7 +307,7 @@ retrospecticus embedding list
 retrospecticus embedding activate <slug>
 ```
 
-The slug has the form `<provider>-<model>`, for example `openai-text-embedding-3-small` or `ollama-embeddinggemma-2`. `retrospecticus reembed --model <slug>` fills a model's vectors from the command line instead.
+The slug has the form `<provider>-<model>`, for example `openai-text-embedding-3-small` or `ollama-embeddinggemma-2` or `omlx-embeddinggemma-2-bf16`. `retrospecticus reembed --model <slug>` fills a model's vectors from the command line instead.
 
 ### Ranking
 
@@ -421,7 +434,7 @@ The config path defaults to `$RETROSPECTICUS_CONFIG`, then `/etc/retrospecticus/
 | `token list` | Lists tokens (never their values). |
 | `token revoke <id>` | Revokes a token. |
 | `secrets list` | Shows which secrets are set. |
-| `secrets set <name>` | Sets a secret from standard input: `embedding_api_key`, `discord_webhook_url`, `smtp_url`, `github_token`. |
+| `secrets set <name>` | Sets a secret from standard input: `embedding_api_key`, `omlx_api_key`, `discord_webhook_url`, `smtp_url`, `github_token`. |
 | `secrets unset <name>` | Removes a secret. |
 | `embedding list` | Lists embedding models with their vector counts and which one search uses. |
 | `embedding activate <slug> [--force]` | Switches search to a model; refuses one with missing vectors unless forced. |

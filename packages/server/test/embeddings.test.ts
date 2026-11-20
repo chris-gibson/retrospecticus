@@ -190,6 +190,13 @@ describe("openai provider", () => {
 });
 
 describe("registry", () => {
+  test("oMLX requires a key and defaults to its local address", async () => {
+    const config = defaultConfig({ embedding: { provider: "omlx", model: "embeddinggemma-2-bf16", dimensions: 768 } }).embedding;
+    expect(createProvider(config)?.slug).toBe("omlx-embeddinggemma-2-bf16");
+    await expect(createProvider(config)!.embed(["x"])).rejects.toThrow(/omlx embeddings need the secret omlx_api_key/);
+    expect(providerForSlug("omlx-embeddinggemma-2-bf16", config, undefined, () => "k").dimensions).toBe(768);
+  });
+
   test("creates providers from config and from slugs", () => {
     expect(createProvider(defaultConfig().embedding)).toBeNull();
     expect(createProvider(defaultConfig({ embedding: { provider: "fake", model: "m" } }).embedding)?.slug).toBe("fake-m");
