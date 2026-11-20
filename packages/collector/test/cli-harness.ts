@@ -8,7 +8,7 @@ import {
   HEARTBEAT_PATH,
   type EnrollStartRequest,
 } from "@retrospecticus/shared";
-import type { CliEnv, RunResult } from "../src/cli/env.ts";
+import { PromptClosed, type CliEnv, type RunResult } from "../src/cli/env.ts";
 
 export type PollStep =
   | { status: "pending" }
@@ -88,7 +88,8 @@ export interface TestCli {
   err: string[];
   prompts: string[];
   commands: string[][];
-  answers: string[];
+  /** null stands for end of input (Ctrl-D). */
+  answers: (string | null)[];
   /** Results for run(), matched by the command's first two words; default is success. */
   results: Map<string, RunResult>;
   abort(): void;
@@ -101,7 +102,7 @@ export function createCli(overrides: Partial<CliEnv> = {}): TestCli {
   const err: string[] = [];
   const prompts: string[] = [];
   const commands: string[][] = [];
-  const answers: string[] = [];
+  const answers: (string | null)[] = [];
   const results = new Map<string, RunResult>();
   const controller = new AbortController();
   let clock = 1_700_000_000_000;
@@ -119,7 +120,9 @@ export function createCli(overrides: Partial<CliEnv> = {}): TestCli {
     isCompiled: true,
     async prompt(question) {
       prompts.push(question);
-      return answers.shift() ?? "";
+      const answer = answers.shift();
+      if (answer === null) throw new PromptClosed("cancelled: no answer (end of input)");
+      return answer ?? "";
     },
     async run(cmd) {
       commands.push(cmd);

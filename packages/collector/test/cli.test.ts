@@ -93,6 +93,22 @@ describe("enroll", () => {
     expect(cli.commands).toEqual([]);
   });
 
+  test("Ctrl-D at the service prompt declines instead of installing or failing", async () => {
+    const { cli, server } = setup({ isTTY: true });
+    cli.answers.push("testbox", null);
+    expect(await runCli(["enroll", "--server", server.url], cli.env)).toBe(0);
+    expect(cli.commands).toEqual([]);
+    expect(existsSync(cli.configPath)).toBe(true);
+  });
+
+  test("Ctrl-D at the machine name prompt cancels before anything is written", async () => {
+    const { cli, server } = setup({ isTTY: true });
+    cli.answers.push(null);
+    expect(await runCli(["enroll", "--server", server.url], cli.env)).toBe(1);
+    expect(server.starts).toEqual([]);
+    expect(existsSync(cli.configPath)).toBe(false);
+  });
+
   test("denied writes nothing", async () => {
     const { cli, server } = setup();
     server.pollScript = [{ status: "denied" }];

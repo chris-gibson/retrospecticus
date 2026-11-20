@@ -279,9 +279,16 @@ case ":$PATH:" in
   *) echo "Note: $bindir is not on your PATH." ;;
 esac
 
-# Standard input is this script when piped from curl, so enrollment talks to the terminal directly.
-if { true </dev/tty; } 2>/dev/null; then
-  exec "$target" enroll --server "$server" </dev/tty
+# Standard input is this script when piped from curl, so enrollment reads from the terminal instead.
+# The terminal is opened by its device name where possible: on macOS the collector cannot watch
+# /dev/tty itself (kqueue rejects it with EINVAL), only the device it stands for.
+tty_dev=$(tty 0<&2 2>/dev/null) || tty_dev=$(tty 0<&1 2>/dev/null) || tty_dev=/dev/tty
+if { true <"$tty_dev"; } 2>/dev/null; then
+  if "$target" enroll --server "$server" <"$tty_dev"; then
+    exit 0
+  fi
+  echo "Enrollment did not finish. To retry: $target enroll --server $server"
+  exit 1
 fi
 echo "Now run: $target enroll --server $server"
 `;

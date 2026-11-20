@@ -13,7 +13,7 @@ import {
 import { loadCollectorConfig, parseCollectorConfig, resolveCollectorConfigPath } from "../config.ts";
 import { COLLECTOR_VERSION, buildHeartbeat } from "../heartbeat.ts";
 import { renderConfig, tildify, updateConfigText, type EnrolledSettings } from "./configfile.ts";
-import { CliError, UsageError, timeoutSignal, type CliEnv } from "./env.ts";
+import { CliError, PromptClosed, UsageError, timeoutSignal, type CliEnv } from "./env.ts";
 import { installService, printInstructions } from "./service.ts";
 
 export interface EnrollOptions {
@@ -204,7 +204,17 @@ async function verifyToken(env: CliEnv, configPath: string, token: string, machi
 }
 
 async function confirm(env: CliEnv, question: string): Promise<boolean> {
-  const answer = (await env.prompt(`${question} [Y/n] `)).trim().toLowerCase();
+  let answer: string;
+  try {
+    answer = (await env.prompt(`${question} [Y/n] `)).trim().toLowerCase();
+  } catch (err) {
+    // Closing the prompt is not consent; by the time this is asked the machine is enrolled, so decline rather than fail.
+    if (err instanceof PromptClosed) {
+      env.out("");
+      return false;
+    }
+    throw err;
+  }
   return answer === "" || answer === "y" || answer === "yes";
 }
 

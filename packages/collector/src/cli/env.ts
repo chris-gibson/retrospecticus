@@ -1,5 +1,5 @@
-import { createInterface } from "node:readline/promises";
 import { homedir, hostname } from "node:os";
+import { readLineSync } from "./read-line.ts";
 
 export interface RunResult {
   code: number;
@@ -46,6 +46,11 @@ export class CliError extends Error {
   override name = "CliError";
 }
 
+/** End of input at a prompt (Ctrl-D): no answer was given. */
+export class PromptClosed extends CliError {
+  override name = "PromptClosed";
+}
+
 export function timeoutSignal(env: CliEnv, ms: number): AbortSignal {
   return AbortSignal.any([env.signal, AbortSignal.timeout(ms)]);
 }
@@ -76,14 +81,17 @@ export function realEnv(runCollector: CliEnv["runCollector"]): CliEnv {
     mainPath,
     isCompiled,
     async prompt(question) {
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      const onAbort = () => rl.close();
-      controller.signal.addEventListener("abort", onAbort, { once: true });
+      process.stdout.write(question);
+      // A blocking read cannot run JS signal handlers, so Ctrl-C at a prompt takes the default path and ends the process.
+      process.off("SIGINT", interrupt);
+      process.off("SIGTERM", interrupt);
       try {
-        return await rl.question(question);
+        const answer = readLineSync();
+        if (answer === null) throw new PromptClosed("cancelled: no answer (end of input)");
+        return answer;
       } finally {
-        controller.signal.removeEventListener("abort", onAbort);
-        rl.close();
+        process.on("SIGINT", interrupt);
+        process.on("SIGTERM", interrupt);
       }
     },
     async run(cmd) {
