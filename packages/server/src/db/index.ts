@@ -51,6 +51,7 @@ function migrate(db: Db): void {
     query_prefix: "TEXT NOT NULL DEFAULT ''",
     document_prefix: "TEXT NOT NULL DEFAULT ''",
   });
+  addMissingColumns(db, "machine_commands", { delivered_token_id: "INTEGER" });
   addMissingColumns(db, "machines", {
     hostname: "TEXT",
     platform: "TEXT",
@@ -59,6 +60,7 @@ function migrate(db: Db): void {
     last_scan_at: "TEXT",
     last_error: "TEXT",
     exec_path: "TEXT",
+    remote_update: "INTEGER",
   });
   db.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)", [String(SCHEMA_VERSION)]);
 }

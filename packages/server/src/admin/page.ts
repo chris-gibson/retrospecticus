@@ -40,6 +40,8 @@ button:disabled { opacity: .5; cursor: default; }
 .msg { min-height: 1.4em; margin: 8px 0 0; color: var(--muted); }
 .msg.error { color: var(--danger); }
 .msg.ok { color: var(--ok); }
+.error-text { color: var(--danger); }
+#upgrade-all { margin-top: 12px; }
 ul.rows { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
 ul.rows li { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; gap: 12px;
   align-items: center; justify-content: space-between; flex-wrap: wrap; }
@@ -493,6 +495,13 @@ async function loadMachines() {
     const stale = failure && !(m.last_upload_at && Date.parse(m.last_upload_at) >= Date.parse(failure.at));
     const where = [m.platform, m.hostname, m.install_dir && "installed in " + m.install_dir].filter(Boolean).join(" · ");
     const outdated = Boolean(m.outdated && serverVersion);
+    const cmd = m.command;
+    const open = Boolean(cmd && (cmd.status === "pending" || cmd.status === "delivered"));
+    const commandText = !cmd ? "" : cmd.status === "pending" ? "Upgrade pending"
+      : cmd.status === "delivered" ? "Upgrading\u2026"
+      : cmd.status === "done" ? "Upgraded to " + cmd.target_version + " " + ago(cmd.finished_at)
+      : cmd.status === "failed" ? "Upgrade failed: " + (cmd.message || "unknown reason")
+      : "Upgrade request expired before the collector checked in";
     return el("li", {}, el("div", { className: "row-main" },
       el("div", { className: "row-title" }, m.machine,
         el("span", { className: "badge" }, m.active_ingest_tokens + " active token" + (m.active_ingest_tokens === 1 ? "" : "s")),
@@ -502,14 +511,39 @@ async function loadMachines() {
       el("div", { className: "row-meta" }, ["heartbeat " + when(m.last_heartbeat_at), "upload " + when(m.last_upload_at),
         "ingest " + when(m.last_ingest_at)].join(" · ")),
       // A collector that reports its install directory has the update command; one from before that only has the installer.
-      outdated ? el("div", { className: "warn" }, "Update available (" + m.collector_version + " → " + serverVersion + "). On " + (m.hostname || m.machine) + ", run ",
-        el("code", {}, m.install_dir ? "<INSTALL_DIR>/retrospecticus-collector update" : "curl -fsSL " + location.origin + "/install.sh | sh")) : null,
+      outdated && !m.remote_update ? el("div", { className: "warn" }, "Update available (" + m.collector_version + " \u2192 " + serverVersion + "). On " + (m.hostname || m.machine) + ", run ",
+        el("code", {}, m.install_dir ? "<INSTALL_DIR>/retrospecticus-collector update" : "curl -fsSL " + location.origin + "/install.sh | sh"),
+        m.install_dir ? " or turn on remote updates with " : null,
+        m.install_dir ? el("code", {}, "<INSTALL_DIR>/retrospecticus-collector remote-update on") : null) : null,
+      outdated && m.remote_update && !open ? el("div", { className: "warn" }, "Update available (" + m.collector_version + " \u2192 " + serverVersion + ").") : null,
+      commandText ? el("div", { className: "row-meta" + (cmd.status === "failed" ? " error-text" : "") }, commandText) : null,
       sources.length ? el("div", { className: "row-meta" }, sources.map((s) =>
         s.name + ": " + s.files + " files, " + (s.pending_files == null ? "" : s.pending_files + " pending, ") +
         bytes(s.bytes_pending) + " unsent").join(" · ")) : null,
-      stale ? el("div", { className: "warn" }, "Collector error " + ago(failure.at) + ": " + failure.message) : null));
+      stale ? el("div", { className: "warn" }, "Collector error " + ago(failure.at) + ": " + failure.message) : null),
+      outdated && m.remote_update && !open && m.active_ingest_tokens > 0 ? el("button", { onclick: () => upgrade(m.machine) }, "Upgrade") : null);
   }));
+  const eligible = machines.filter((m) => m.outdated && m.remote_update && m.active_ingest_tokens > 0 && !(m.command && (m.command.status === "pending" || m.command.status === "delivered")));
+  const all = $("upgrade-all");
+  all.textContent = "Upgrade all outdated (" + eligible.length + ")";
+  all.classList.toggle("hidden", eligible.length === 0);
   $("machines-empty").classList.toggle("hidden", machines.length > 0);
+}
+
+async function upgrade(machine) {
+  try {
+    await api("machines/" + encodeURIComponent(machine) + "/update", {});
+    say("machines-msg", "Upgrade requested for " + machine + ". It starts when the collector next checks in.", "ok");
+  } catch (err) { report("machines-msg", err); }
+  loadMachines();
+}
+
+async function upgradeAll() {
+  try {
+    const res = await api("machines/update-outdated", {});
+    say("machines-msg", "Upgrade requested for " + res.count + " machine" + (res.count === 1 ? "" : "s") + ".", "ok");
+  } catch (err) { report("machines-msg", err); }
+  loadMachines();
 }
 
 async function loadTokens() {
@@ -595,6 +629,7 @@ $("dismiss-token").addEventListener("click", () => {
 $("signout").addEventListener("click", logout);
 $("stats-refresh").addEventListener("click", loadStats);
 $("drift-refresh").addEventListener("click", loadDrift);
+$("upgrade-all").addEventListener("click", upgradeAll);
 for (const button of $("tabs").querySelectorAll("button")) button.addEventListener("click", () => showTab(button.dataset.tab));
 window.addEventListener("hashchange", () => { if (!$("main").classList.contains("hidden")) showTab(tabFromHash()); });
 document.addEventListener("visibilitychange", () => {
@@ -672,6 +707,7 @@ ${WIZARD_BODY}
     <section data-panel="machines">
       <h2>Machines</h2>
       <p id="machines-msg" class="msg" role="status"></p>
+      <button id="upgrade-all" type="button" class="primary hidden"></button>
       <ul id="machines" class="rows"></ul>
       <p id="machines-empty" class="empty hidden">No machine has reported in yet.</p>
     </section>

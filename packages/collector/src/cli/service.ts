@@ -305,7 +305,7 @@ export async function uninstallService(
     doomed.push(config.token_file, config.state_file);
   }
   // Only the copy that `install` made is removed; a binary run from elsewhere belongs to the user.
-  doomed.push(paths.binary, paths.log);
+  doomed.push(paths.binary, `${paths.binary}.prev`, paths.log);
   for (const path of doomed) {
     if (!existsSync(path)) continue;
     rmSync(path);

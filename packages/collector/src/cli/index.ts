@@ -4,6 +4,7 @@ import { COLLECTOR_VERSION } from "../heartbeat.ts";
 import { parseFlags } from "./args.ts";
 import { enroll } from "./enroll.ts";
 import { UsageError, type CliEnv } from "./env.ts";
+import { remoteUpdate } from "./remote-update.ts";
 import { installService, uninstallService } from "./service.ts";
 import { status } from "./status.ts";
 import { enrolledWith, update } from "./update.ts";
@@ -15,6 +16,7 @@ Commands:
   enroll              Register this machine with a server and save its token
   install             Run the collector as a background service
   uninstall           Remove the background service
+  remote-update       Let the server update this collector from its admin page (on) or not (off)
   update              Replace this binary with the server's version and restart the service
   status              Show the configuration, service and server state
   version             Print the version
@@ -23,9 +25,10 @@ Commands:
 
 Options:
   run        --config <path>
-  enroll     --server <url> [--machine <name>] [--install | --no-install] [--config <path>] [--force]
+  enroll     --server <url> [--machine <name>] [--install | --no-install] [--remote-update | --no-remote-update] [--config <path>] [--force]
   install    [--config <path>]
   uninstall  [--purge] [--config <path>]
+  remote-update  on|off [--config <path>]
   update     [--config <path>] [--force]
   status     [--config <path>]
 
@@ -54,14 +57,18 @@ async function dispatch(argv: readonly string[], env: CliEnv): Promise<number> {
     case "run":
       return runCommand(rest, env);
     case "enroll": {
-      const { values, bools } = parseFlags(rest, { values: ["server", "machine", "config"], bools: ["install", "no-install", "force"] });
+      const { values, bools } = parseFlags(rest, { values: ["server", "machine", "config"], bools: ["install", "no-install", "remote-update", "no-remote-update", "force"] });
       if (bools.has("help")) return help(env);
       if (bools.has("install") && bools.has("no-install")) throw new UsageError("--install and --no-install cannot be combined");
+      if (bools.has("remote-update") && bools.has("no-remote-update")) {
+        throw new UsageError("--remote-update and --no-remote-update cannot be combined");
+      }
       return enroll(env, {
         server: values.server,
         machine: values.machine,
         config: values.config,
         install: bools.has("install") ? true : bools.has("no-install") ? false : undefined,
+        remoteUpdate: bools.has("remote-update") ? true : bools.has("no-remote-update") ? false : undefined,
         force: bools.has("force"),
       });
     }
@@ -76,10 +83,17 @@ async function dispatch(argv: readonly string[], env: CliEnv): Promise<number> {
       const configPath = resolveCollectorConfigPath(values.config, { env: env.env, home: env.home });
       return uninstallService(env, configPath, { purge: bools.has("purge") });
     }
-    case "update": {
-      const { values, bools } = parseFlags(rest, { values: ["config"], bools: ["restart-only", "force"] });
+    case "remote-update": {
+      const [choice, ...flags] = rest;
+      const { values, bools } = parseFlags(choice === "on" || choice === "off" ? flags : rest, { values: ["config"] });
       if (bools.has("help")) return help(env);
-      return update(env, { config: values.config, restartOnly: bools.has("restart-only"), force: bools.has("force") });
+      if (choice !== "on" && choice !== "off") throw new UsageError("remote-update needs on or off");
+      return remoteUpdate(env, choice === "on", values.config);
+    }
+    case "update": {
+      const { values, bools } = parseFlags(rest, { values: ["config"], bools: ["restart-only", "force", "remote"] });
+      if (bools.has("help")) return help(env);
+      return update(env, { config: values.config, restartOnly: bools.has("restart-only"), force: bools.has("force"), remote: bools.has("remote") });
     }
     case "status": {
       const { values, bools } = parseFlags(rest, { values: ["config", "enrolled-with"] });

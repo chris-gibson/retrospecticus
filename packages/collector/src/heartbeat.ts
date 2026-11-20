@@ -1,4 +1,4 @@
-import { HEARTBEAT_PATH, type Heartbeat, type Source, VERSION } from "@retrospecticus/shared";
+import { HEARTBEAT_PATH, HeartbeatResponseSchema, type Heartbeat, type HeartbeatCommand, type Source, VERSION } from "@retrospecticus/shared";
 import type { Uploader } from "./uploader.ts";
 
 export const COLLECTOR_VERSION = VERSION;
@@ -21,6 +21,9 @@ export interface CollectorFacts {
   last_scan_at: string | null;
   last_error: { at: string; message: string } | null;
   exec_path: string | null;
+  remote_update: boolean;
+  /** A failed command the server has not yet been told about. */
+  command_result?: { id: string; ok: boolean; message?: string };
 }
 
 export function buildHeartbeat(sources: readonly SourceStats[], facts?: CollectorFacts): Heartbeat {
@@ -31,12 +34,24 @@ export function buildHeartbeat(sources: readonly SourceStats[], facts?: Collecto
   };
 }
 
-/** Returns null on success, otherwise why it failed. A lost heartbeat is not retried; the next one replaces it. */
-export function sendHeartbeat(
+export interface HeartbeatOutcome {
+  /** Null on success, otherwise why it failed. A lost heartbeat is not retried; the next one replaces it. */
+  error: string | null;
+  /** What the server wants done, when it said so. */
+  command: HeartbeatCommand | null;
+}
+
+export async function sendHeartbeat(
   uploader: Uploader,
   sources: readonly SourceStats[],
   facts: CollectorFacts,
   stop: AbortSignal,
-): Promise<string | null> {
-  return uploader.postJson(HEARTBEAT_PATH, buildHeartbeat(sources, facts), stop);
+): Promise<HeartbeatOutcome> {
+  const res = await uploader.postJson(HEARTBEAT_PATH, buildHeartbeat(sources, facts), stop);
+  if (!res.ok) return { error: res.error, command: null };
+  // Only the server's own answer counts as delivered: a proxy's 200 page would otherwise clear a failure report that
+  // never reached the server.
+  const parsed = HeartbeatResponseSchema.safeParse(res.body);
+  if (!parsed.success || !parsed.data.ok) return { error: "unexpected answer to the heartbeat (is a proxy in the way?)", command: null };
+  return { error: null, command: parsed.data.command ?? null };
 }

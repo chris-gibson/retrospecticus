@@ -57,6 +57,12 @@ export const HeartbeatSchema = z.object({
   exec_path: z.string().max(4096).nullable().optional(),
   /** A short, safe description; never file contents or the token. */
   last_error: z.object({ at: z.string().max(40), message: z.string() }).nullable().optional(),
+  /** Whether this collector's config lets the server tell it to update itself. */
+  remote_update: z.boolean().optional(),
+  /** The outcome of a command that failed, so the server can show why. Success is seen as the new version. */
+  command_result: z
+    .object({ id: z.string().max(64), ok: z.boolean(), message: z.string().max(500).optional() })
+    .optional(),
   sources: z.array(
     z.object({
       name: SourceSchema,
@@ -68,6 +74,18 @@ export const HeartbeatSchema = z.object({
   ),
 });
 export type Heartbeat = z.infer<typeof HeartbeatSchema>;
+
+/** What a heartbeat answer carries when the server wants the collector to do something. */
+export const HeartbeatCommandSchema = z.object({
+  id: z.string(),
+  command: z.literal("update"),
+  /** Informational: the collector always installs the server's own version. */
+  version: z.string(),
+});
+export type HeartbeatCommand = z.infer<typeof HeartbeatCommandSchema>;
+
+export const HeartbeatResponseSchema = z.object({ ok: z.boolean(), command: HeartbeatCommandSchema.optional() });
+export type HeartbeatResponse = z.infer<typeof HeartbeatResponseSchema>;
 
 export const MESSAGE_ROLES = ["user", "assistant", "tool_call", "tool_result", "reasoning"] as const;
 export type MessageRole = (typeof MESSAGE_ROLES)[number];

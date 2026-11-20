@@ -37,6 +37,8 @@ const CollectorConfigSchema = z.strictObject({
   request_timeout_seconds: z.number().positive().default(120),
   max_body_bytes: z.number().int().positive().max(MAX_APPEND_BODY_BYTES).default(MAX_APPEND_BODY_BYTES),
   status_page: StatusPageSchema.prefault({}),
+  /** Lets the server tell this collector to replace itself with the server's version. Off unless chosen. */
+  remote_update: z.boolean().default(false),
   sources: z.array(SourceConfigSchema).min(1).optional(),
 });
 
@@ -63,6 +65,7 @@ export interface CollectorConfig {
   request_timeout_seconds: number;
   max_body_bytes: number;
   status_page: { enabled: boolean; port: number };
+  remote_update: boolean;
   sources: SourceConfig[];
 }
 

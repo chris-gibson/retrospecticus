@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   ENROLL_POLL_PATH,
@@ -12,7 +12,7 @@ import {
 } from "@retrospecticus/shared";
 import { loadCollectorConfig, parseCollectorConfig, resolveCollectorConfigPath } from "../config.ts";
 import { COLLECTOR_VERSION, buildHeartbeat } from "../heartbeat.ts";
-import { renderConfig, tildify, updateConfigText, type EnrolledSettings } from "./configfile.ts";
+import { renderConfig, tildify, updateConfigText, writeConfigAtomic, type EnrolledSettings } from "./configfile.ts";
 import { CliError, PromptClosed, UsageError, timeoutSignal, type CliEnv } from "./env.ts";
 import { installService, printInstructions } from "./service.ts";
 
@@ -21,6 +21,8 @@ export interface EnrollOptions {
   machine?: string;
   /** undefined means ask when interactive. */
   install?: boolean;
+  /** undefined means ask when interactive, and otherwise leave the setting as it is (off for a new config). */
+  remoteUpdate?: boolean;
   config?: string;
   force: boolean;
 }
@@ -150,14 +152,6 @@ function writeSecret(path: string, content: string): void {
   chmodSync(path, 0o600);
 }
 
-/** Temp file plus rename, so a crash never leaves a half-written config. */
-function writeConfigAtomic(path: string, content: string): void {
-  const temp = `${path}.tmp-${process.pid}`;
-  writeFileSync(temp, content, { mode: 0o600 });
-  chmodSync(temp, 0o600);
-  renameSync(temp, path);
-}
-
 function writeConfig(env: CliEnv, configPath: string, settings: EnrolledSettings, force: boolean): string {
   mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
   if (!existsSync(configPath)) {
@@ -203,10 +197,32 @@ async function verifyToken(env: CliEnv, configPath: string, token: string, machi
   }
 }
 
-async function confirm(env: CliEnv, question: string): Promise<boolean> {
+/** The existing config's remote_update when it is for this server; "other-server" when it was given to another. */
+function existingConsent(env: CliEnv, configPath: string, server: string): boolean | "other-server" {
+  let existing;
+  try {
+    existing = loadCollectorConfig(configPath, { env: env.env, home: env.home });
+  } catch {
+    return false;
+  }
+  if (!sameOrigin(existing.server_url, server)) return existing.remote_update ? "other-server" : false;
+  return existing.remote_update;
+}
+
+function sameOrigin(a: string, b: string): boolean {
+  try {
+    const x = new URL(a);
+    const y = new URL(b);
+    return x.origin === y.origin && x.pathname.replace(/\/+$/, "") === y.pathname.replace(/\/+$/, "");
+  } catch {
+    return false;
+  }
+}
+
+async function confirm(env: CliEnv, question: string, defaultYes = true): Promise<boolean> {
   let answer: string;
   try {
-    answer = (await env.prompt(`${question} [Y/n] `)).trim().toLowerCase();
+    answer = (await env.prompt(`${question} ${defaultYes ? "[Y/n]" : "[y/N]"} `)).trim().toLowerCase();
   } catch (err) {
     // Closing the prompt is not consent; by the time this is asked the machine is enrolled, so decline rather than fail.
     if (err instanceof PromptClosed) {
@@ -215,7 +231,7 @@ async function confirm(env: CliEnv, question: string): Promise<boolean> {
     }
     throw err;
   }
-  return answer === "" || answer === "y" || answer === "yes";
+  return answer === "" ? defaultYes : answer === "y" || answer === "yes";
 }
 
 export async function enroll(env: CliEnv, options: EnrollOptions): Promise<number> {
@@ -233,6 +249,18 @@ export async function enroll(env: CliEnv, options: EnrollOptions): Promise<numbe
       throw new UsageError(`machine name ${JSON.stringify(machine)} must be letters, digits, ".", "_" or "-", up to 63 characters, starting with a letter or digit`);
     }
 
+    // Asked before the long wait for approval, and before the config is written, since installing the service reads it.
+    // Consent belongs to one server: re-enrolling with the same one keeps the current choice (Enter never turns it
+    // off), while a different server starts from off, asked or not.
+    const kept = existingConsent(env, configPath, server);
+    const remoteUpdate =
+      options.remoteUpdate ??
+      (env.isTTY
+        ? await confirm(env, `Let ${server} update this collector from its admin page?`, kept === true)
+        : kept === "other-server"
+          ? false
+          : undefined);
+
     const start = await startEnrollment(env, server, machine);
     env.out(`Approve this machine at ${start.verification_url}`);
     env.out(`Code: ${start.user_code}   (expires in ${describeDuration(start.expires_in)})`);
@@ -245,7 +273,7 @@ export async function enroll(env: CliEnv, options: EnrollOptions): Promise<numbe
     const how = writeConfig(
       env,
       configPath,
-      { server_url: server, machine: approved.machine, token_file: tildify(tokenFile, env.home) },
+      { server_url: server, machine: approved.machine, token_file: tildify(tokenFile, env.home), remote_update: remoteUpdate },
       options.force,
     );
     env.out(`Approved. Machine ${approved.machine} is enrolled.`);

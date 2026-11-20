@@ -38,6 +38,8 @@ export function encodeIngestPath(relPath: string): string {
   return relPath.split("/").map(encodeURIComponent).join("/");
 }
 
+export type PostResult = { ok: true; body: unknown } | { ok: false; error: string };
+
 const PER_FILE_REFUSALS = new Set([400, 413, 414, 431]);
 
 async function errorText(res: Response): Promise<string> {
@@ -54,6 +56,8 @@ async function errorText(res: Response): Promise<string> {
     return "";
   }
 }
+
+const MAX_JSON_ANSWER_BYTES = 64 * 1024;
 
 export class Uploader {
   constructor(private readonly options: UploaderOptions) {}
@@ -102,8 +106,8 @@ export class Uploader {
     return { kind: "unavailable", reason: `HTTP ${res.status}${message ? `: ${message}` : ""}` };
   }
 
-  /** Returns null on success, otherwise why it failed. */
-  async postJson(path: string, body: unknown, stop: AbortSignal): Promise<string | null> {
+  /** The parsed body on success (undefined when it is not JSON), otherwise why it failed. */
+  async postJson(path: string, body: unknown, stop: AbortSignal): Promise<PostResult> {
     try {
       const res = await fetch(this.options.serverUrl + path, {
         method: "POST",
@@ -117,12 +121,23 @@ export class Uploader {
         redirect: "error",
       });
       if (res.ok) {
-        await res.arrayBuffer();
-        return null;
+        // The answers expected here are a few hundred bytes; anything far larger is not from the server.
+        const declared = Number(res.headers.get("content-length") ?? "0");
+        if (declared > MAX_JSON_ANSWER_BYTES) {
+          await res.body?.cancel();
+          return { ok: false, error: `answer too large (${declared} bytes)` };
+        }
+        const text = await res.text();
+        if (text.length > MAX_JSON_ANSWER_BYTES) return { ok: false, error: `answer too large (${text.length} bytes)` };
+        try {
+          return { ok: true, body: JSON.parse(text) };
+        } catch {
+          return { ok: true, body: undefined };
+        }
       }
-      return `HTTP ${res.status}: ${await errorText(res)}`;
+      return { ok: false, error: `HTTP ${res.status}: ${await errorText(res)}` };
     } catch (err) {
-      return (err as Error).message || String(err);
+      return { ok: false, error: (err as Error).message || String(err) };
     }
   }
 }
