@@ -32,6 +32,11 @@ jobs:
             exit 1
           fi
 
+      # GitHub's generated notes list only merged pull requests, so they miss work committed directly and read oddly;
+      # each release ships notes written for it instead.
+      - name: Check the release notes are written
+        run: sh scripts/check-release-notes.sh "$GITHUB_REF_NAME"
+
       - name: Check the third-party notices are current
         run: bun scripts/third-party-notices.ts --check
 
@@ -60,7 +65,7 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/collectors/* LICENSE THIRD_PARTY_NOTICES.md --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/collectors/* LICENSE THIRD_PARTY_NOTICES.md --title "$GITHUB_REF_NAME" --notes-file "docs/releases/$GITHUB_REF_NAME.md"
 
   image:
     needs: release
