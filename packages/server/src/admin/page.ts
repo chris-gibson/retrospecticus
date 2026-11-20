@@ -491,7 +491,7 @@ async function loadMachines() {
     let failure = null;
     try { failure = m.last_error ? JSON.parse(m.last_error) : null; } catch {}
     const stale = failure && !(m.last_upload_at && Date.parse(m.last_upload_at) >= Date.parse(failure.at));
-    const where = [m.platform, m.hostname].filter(Boolean).join(" · ");
+    const where = [m.platform, m.hostname, m.install_dir && "installed in " + m.install_dir].filter(Boolean).join(" · ");
     const outdated = Boolean(m.outdated && serverVersion);
     return el("li", {}, el("div", { className: "row-main" },
       el("div", { className: "row-title" }, m.machine,
@@ -501,7 +501,9 @@ async function loadMachines() {
       el("div", { className: "row-meta" }, [m.collector_version && "collector " + m.collector_version, where].filter(Boolean).join(" · ")),
       el("div", { className: "row-meta" }, ["heartbeat " + when(m.last_heartbeat_at), "upload " + when(m.last_upload_at),
         "ingest " + when(m.last_ingest_at)].join(" · ")),
-      outdated ? el("div", { className: "warn" }, "Update: run curl -fsSL " + location.origin + "/install.sh | sh, or retrospecticus-collector update, on this machine.") : null,
+      // A collector that reports its install directory has the update command; one from before that only has the installer.
+      outdated ? el("div", { className: "warn" }, "Update available (" + m.collector_version + " → " + serverVersion + "). On " + (m.hostname || m.machine) + ", run ",
+        el("code", {}, m.install_dir ? "<INSTALL_DIR>/retrospecticus-collector update" : "curl -fsSL " + location.origin + "/install.sh | sh")) : null,
       sources.length ? el("div", { className: "row-meta" }, sources.map((s) =>
         s.name + ": " + s.files + " files, " + (s.pending_files == null ? "" : s.pending_files + " pending, ") +
         bytes(s.bytes_pending) + " unsent").join(" · ")) : null,

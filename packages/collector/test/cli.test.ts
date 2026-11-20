@@ -264,6 +264,14 @@ describe("enroll", () => {
   });
 });
 
+/** Points the config's status page at the fake server, which then answers as a collector of `version` running. */
+function running(cli: TestCli, server: FakeServer, version: string): void {
+  const config = JSON.parse(readFileSync(cli.configPath, "utf8"));
+  config.status_page = { enabled: true, port: Number(new URL(server.url).port) };
+  writeFileSync(cli.configPath, JSON.stringify(config));
+  server.runningVersion = version;
+}
+
 async function configured(cli: TestCli, server: FakeServer): Promise<void> {
   expect(await runCli(["enroll", "--server", server.url, "--machine", "testbox", "--no-install"], cli.env)).toBe(0);
   cli.out.length = 0;
@@ -509,6 +517,40 @@ describe("status", () => {
     expect(out).toContain("Status page: http://127.0.0.1:7879/");
   });
 
+  test("shows the running version and says when a restart is needed", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    running(cli, server, "0.0.1");
+    expect(await runCli(["status"], cli.env)).toBe(0);
+    expect(text(cli.out)).toContain("Daemon:  answering, version 0.0.1");
+    expect(text(cli.out)).toContain(`Restart needed: this binary is ${COLLECTOR_VERSION}, but the running collector is still 0.0.1.`);
+    cli.out.length = 0;
+    server.runningVersion = COLLECTOR_VERSION;
+    await runCli(["status"], cli.env);
+    expect(text(cli.out)).not.toContain("Restart needed");
+    // A newer daemon (an older CLI copy run by hand) is not something a restart should "fix".
+    cli.out.length = 0;
+    server.runningVersion = "99.0.0";
+    await runCli(["status"], cli.env);
+    expect(text(cli.out)).not.toContain("Restart needed");
+  });
+
+  test("does not trust a status page that answers for another collector, or a turned-off one", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    running(cli, server, "0.0.1");
+    server.runningMachine = "someone-else";
+    await runCli(["status"], cli.env);
+    expect(text(cli.out)).toContain("Daemon:  unknown (the status page port answered for another collector (someone-else))");
+    expect(text(cli.out)).not.toContain("Restart needed");
+    const config = JSON.parse(readFileSync(cli.configPath, "utf8"));
+    config.status_page = { enabled: false };
+    writeFileSync(cli.configPath, JSON.stringify(config));
+    cli.out.length = 0;
+    await runCli(["status"], cli.env);
+    expect(text(cli.out)).toContain("Status page: disabled");
+  });
+
   test("an unreachable server and a missing config", async () => {
     const { cli, server } = setup();
     await configured(cli, server);
@@ -590,6 +632,67 @@ describe("update", () => {
     expect(await runCli(["update"], cli.env)).toBe(0);
     expect(text(cli.out)).toContain("Already up to date");
     expect(readFileSync(servicePaths(cli.home).binary, "utf8")).toBe(before);
+    expect(cli.commands).toEqual([]);
+  });
+
+  test("an installed but not yet running update restarts the service instead of saying it is up to date", async () => {
+    const { cli, server } = await installed();
+    server.version = COLLECTOR_VERSION;
+    running(cli, server, "0.0.1");
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(text(cli.out)).toContain("The running collector is still 0.0.1.");
+    expect(text(cli.out)).toContain("Restarted the service.");
+    expect(cli.commands).toEqual([["systemctl", "--user", "restart", "retrospecticus-collector"]]);
+  });
+
+  test("a binary newer than the server still restarts a daemon older than it", async () => {
+    const { cli, server } = await installed();
+    server.version = "0.0.1";
+    running(cli, server, "0.0.0");
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(text(cli.out)).toContain("nothing to download");
+    expect(cli.commands).toEqual([["systemctl", "--user", "restart", "retrospecticus-collector"]]);
+  });
+
+  test("never restarts for a newer daemon, another collector's page, or a page that is off", async () => {
+    const { cli, server } = await installed();
+    server.version = COLLECTOR_VERSION;
+    running(cli, server, "99.0.0");
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    server.runningVersion = "0.0.1";
+    server.runningMachine = "someone-else";
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(text(cli.out)).toContain("answered for another collector");
+    const config = JSON.parse(readFileSync(cli.configPath, "utf8"));
+    config.status_page = { enabled: false };
+    writeFileSync(cli.configPath, JSON.stringify(config));
+    cli.out.length = 0;
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(text(cli.out)).toContain("Already up to date");
+    expect(text(cli.out)).toContain("Could not check which version is running: the status page is turned off.");
+    expect(cli.commands).toEqual([]);
+  });
+
+  test("warns when this copy is not the one update manages", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    server.version = COLLECTOR_VERSION;
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(text(cli.err)).toContain(`this copy runs from ${cli.env.execPath}, but update installs to ${servicePaths(cli.home).binary}`);
+    const managed = await installed();
+    managed.server.version = COLLECTOR_VERSION;
+    managed.cli.env.execPath = servicePaths(managed.cli.home).binary;
+    expect(await runCli(["update"], managed.cli.env)).toBe(0);
+    expect(text(managed.cli.err)).not.toContain("this copy runs from");
+  });
+
+  test("without a service, an installed but not yet running update says to restart it", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    server.version = COLLECTOR_VERSION;
+    running(cli, server, "0.0.1");
+    expect(await runCli(["update"], cli.env)).toBe(1);
+    expect(text(cli.out)).toContain("restart the collector yourself");
     expect(cli.commands).toEqual([]);
   });
 

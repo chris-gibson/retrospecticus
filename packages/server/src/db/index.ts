@@ -58,6 +58,7 @@ function migrate(db: Db): void {
     last_upload_at: "TEXT",
     last_scan_at: "TEXT",
     last_error: "TEXT",
+    exec_path: "TEXT",
   });
   db.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)", [String(SCHEMA_VERSION)]);
 }

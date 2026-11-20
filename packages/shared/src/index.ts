@@ -53,6 +53,8 @@ export const HeartbeatSchema = z.object({
   started_at: z.string().max(40).optional(),
   last_upload_at: z.string().max(40).nullable().optional(),
   last_scan_at: z.string().max(40).nullable().optional(),
+  /** The executable the collector runs from, so the admin page can give a command that works there; null from source. */
+  exec_path: z.string().max(4096).nullable().optional(),
   /** A short, safe description; never file contents or the token. */
   last_error: z.object({ at: z.string().max(40), message: z.string() }).nullable().optional(),
   sources: z.array(

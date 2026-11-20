@@ -37,6 +37,10 @@ export interface FakeServer {
   whoamiStatus: number;
   /** Answer the token routes with a proxy's HTML page and 200, as a misrouted reverse proxy would. */
   proxyPage: boolean;
+  /** When set, /status.json answers as a running collector of this version would. */
+  runningVersion: string | null;
+  /** The machine the fake status page claims to be; defaults to the enrolled one. */
+  runningMachine: string | null;
   startStatus: number;
   startBody: string | null;
   pollScript: PollStep[];
@@ -57,6 +61,8 @@ export function fakeServer(machine = "testbox"): FakeServer {
     revokeStatus: 200,
     whoamiStatus: 200,
     proxyPage: false,
+    runningVersion: null,
+    runningMachine: null,
     startStatus: 200,
     startBody: null,
     pollScript: [{ status: "pending" }, { status: "approved", token: "rt_faketoken123", machine }],
@@ -70,6 +76,18 @@ export function fakeServer(machine = "testbox"): FakeServer {
       if (path === "/healthz") return Response.json({ ok: true, version: state.version });
       if (path === "/downloads/SHA256SUMS") return state.sums === null ? new Response("no", { status: 404 }) : new Response(state.sums);
       if (path.startsWith("/downloads/collector/")) return state.binary === null ? new Response("no", { status: 404 }) : new Response(state.binary);
+      if (path === "/status.json") {
+        if (state.runningVersion === null) return new Response("not found", { status: 404 });
+        return Response.json({
+          collector_version: state.runningVersion,
+          machine: state.runningMachine ?? machine,
+          server_url: state.url,
+          uptime_seconds: 60,
+          sources: [],
+          last_upload_at: null,
+          last_error: null,
+        });
+      }
       if (state.proxyPage && (path === TOKEN_WHOAMI_PATH || path === TOKEN_REVOKE_SELF_PATH)) {
         return new Response("<html>Welcome to nginx</html>", { status: 200, headers: { "Content-Type": "text/html" } });
       }

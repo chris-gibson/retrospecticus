@@ -312,6 +312,15 @@ describe("machines and tokens", () => {
     expect(((await (await adminGet(clock.app, "/admin/api/machines", cookie)).json()) as { server_version: string }).server_version).toBe(VERSION);
   });
 
+  test("machines carry the directory the collector runs from, or null for collectors that do not report it", async () => {
+    const { cookie } = await adminSession(clock.app, h);
+    h.db.run(
+      "INSERT INTO machines (machine, collector_version, exec_path) VALUES ('mac', '0.0.1', '/Users/a b/.local/bin/retrospecticus-collector'), ('old', '0.0.1', NULL)",
+    );
+    const { machines } = (await (await adminGet(clock.app, "/admin/api/machines", cookie)).json()) as { machines: Array<Record<string, unknown>> };
+    expect(Object.fromEntries(machines.map((m) => [m.machine, m.install_dir]))).toEqual({ mac: "/Users/a b/.local/bin", old: null });
+  });
+
   test("only collectors older than the server are outdated", async () => {
     const { cookie } = await adminSession(clock.app, h);
     h.db.run("INSERT INTO machines (machine, collector_version) VALUES ('old', '0.0.1'), ('same', ?), ('newer', '99.0.0'), ('odd', 'dev'), ('none', NULL)", [VERSION]);
