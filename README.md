@@ -433,13 +433,20 @@ After a restore from `raw/` alone, reissue the tokens (`token create`) and relea
 
 ## Releases
 
-Pushing a version tag publishes the collector executables:
+To release:
 
-```sh
-git tag v0.1.0 && git push origin v0.1.0
-```
+1. On a branch from `main`, run `bun scripts/release.ts 0.3.0`. It bumps the version everywhere it is written (`VERSION` in `packages/shared/src/index.ts`, the MCP server version, the workspace `package.json` files, the README's install example) and starts `docs/releases/v0.3.0.md` with the commits since the last tag.
+2. Rewrite those notes for people upgrading (what is new, what to do), and delete their draft line. They become the release's text on GitHub.
+3. Open a pull request. Its check fails while the notes are missing or still the draft, so a version bump cannot merge without them.
+4. After it is merged, tag `main`:
 
-`.github/workflows/release.yml` checks that the tag matches `VERSION` in `packages/shared/src/index.ts`, runs the type check and the tests, builds the four collectors and attaches them, the Linux server packages (x64 and arm64) and `SHA256SUMS` to a GitHub release, then publishes the server image for linux/amd64 and linux/arm64 to `ghcr.io/chris-gibson/retrospecticus` as `<version>`, `<major>.<minor>` and `latest`. The image's build stage cross-compiles and its final stage runs no commands, so both platforms build on an x64 runner without emulation. A server hands new machines the collector from the release matching its own `VERSION`, so bump `VERSION`, rebuild the server and tag together.
+   ```sh
+   git checkout main && git pull && git tag v0.3.0 && git push origin v0.3.0
+   ```
+
+`.github/workflows/release.yml` checks again that the tag matches `VERSION` and that the notes are finished, runs the type check and the tests, builds the four collectors and attaches them, the Linux server packages (x64 and arm64) and `SHA256SUMS` to a GitHub release whose text is the notes file, then publishes the server image for linux/amd64 and linux/arm64 to `ghcr.io/chris-gibson/retrospecticus` as `<version>`, `<major>.<minor>` and `latest`. The image's build stage cross-compiles and its final stage runs no commands, so both platforms build on an x64 runner without emulation. A server hands new machines the collector from the release matching its own `VERSION`, so bump `VERSION`, rebuild the server and tag together.
+
+If a tag was pushed before its notes were merged, the workflow stops before publishing anything. Remove the tag, merge the notes, and tag again: `git tag -d v0.3.0 && git push origin :refs/tags/v0.3.0`.
 
 ## Command reference
 

@@ -1,0 +1,29 @@
+name: Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-notes:
+    # A version bump must bring its release notes, so tagging never stops at a missing or unfinished file.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check a version bump has its release notes
+        run: |
+          version() { sed -n 's/^export const VERSION = "\(.*\)";$/\1/p'; }
+          head=$(version < packages/shared/src/index.ts)
+          base=$(git show "origin/$GITHUB_BASE_REF:packages/shared/src/index.ts" | version)
+          if [ "$head" = "$base" ]; then
+            echo "VERSION is unchanged ($head); no release notes needed."
+            exit 0
+          fi
+          echo "VERSION $base -> $head"
+          sh scripts/check-release-notes.sh "v$head"
