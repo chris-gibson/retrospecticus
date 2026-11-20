@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { HEADER_MACHINE, TOKEN_WHOAMI_PATH, compareVersions } from "@retrospecticus/shared";
 import { loadCollectorConfig, resolveCollectorConfigPath, type CollectorConfig } from "../config.ts";
 import { COLLECTOR_VERSION } from "../heartbeat.ts";
 import { CliError, timeoutSignal, type CliEnv } from "./env.ts";
 import { restartInstalledService, servicePaths } from "./service.ts";
+import { describeUnknown, probeDaemon, restartNeeded } from "./status.ts";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const DOWNLOAD_TIMEOUT_MS = 120_000;
@@ -73,14 +74,15 @@ export async function update(env: CliEnv, options: UpdateOptions): Promise<numbe
   } | null;
   const latest = typeof health?.version === "string" ? health.version : null;
   if (!latest) throw new CliError(`${config.server_url} did not report its version; is it a Retrospecticus server?`);
+  warnIfUnmanaged(env);
   const order = compareVersions(COLLECTOR_VERSION, latest);
   if (order === 0) {
     env.out(`Already up to date (${COLLECTOR_VERSION}).`);
-    return 0;
+    return await restartIfBehind(env, config);
   }
   if (order !== null && order > 0 && !options.force) {
-    env.out(`This collector (${COLLECTOR_VERSION}) is newer than the server (${latest}); nothing to do. --force installs the server's version.`);
-    return 0;
+    env.out(`This collector (${COLLECTOR_VERSION}) is newer than the server (${latest}); nothing to download. --force installs the server's version.`);
+    return await restartIfBehind(env, config);
   }
 
   const platform = `${env.platform}-${env.arch}`;
@@ -126,6 +128,37 @@ export async function update(env: CliEnv, options: UpdateOptions): Promise<numbe
   }
   rmSync(previous, { force: true });
   return 0;
+}
+
+/**
+ * With nothing to download, the file on disk can still be newer than the process uploading: an update whose restart
+ * was skipped. The server judges by what is running, so that is what has to catch up.
+ */
+async function restartIfBehind(env: CliEnv, config: CollectorConfig): Promise<number> {
+  const probe = await probeDaemon(env, config);
+  if (probe.kind !== "ok") {
+    env.out(`Could not check which version is running: ${describeUnknown(probe)}. \`retrospecticus-collector status\` shows it once the page answers.`);
+    return 0;
+  }
+  const running = probe.snapshot.collector_version;
+  if (!restartNeeded(running)) return 0;
+  env.out(`The running collector is still ${running}.`);
+  if (!(await restartInstalledService(env))) {
+    env.out("No service is installed; restart the collector yourself to switch to the new version.");
+    return 1;
+  }
+  env.out("Restarted the service.");
+  return 0;
+}
+
+/** update replaces the copy the service runs; a collector started from anywhere else keeps running the old code. */
+function warnIfUnmanaged(env: CliEnv): void {
+  const managed = servicePaths(env.home).binary;
+  if (resolve(env.execPath) === managed) return;
+  env.err(
+    `warning: this copy runs from ${env.execPath}, but update installs to ${managed}, the copy the service runs. ` +
+      `This copy stays as it is; run \`${managed} install\` to run the collector from there as a service.`,
+  );
 }
 
 export const ENROLLED = 0;
