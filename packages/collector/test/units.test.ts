@@ -23,6 +23,7 @@ describe("config", () => {
       token_file: join(home, ".config/retrospecticus/ingest-token"),
       machine: "laptop",
       poll_seconds: 30,
+      remote_update: false,
       state_file: join(home, ".local/state/retrospecticus/collector-state.json"),
       watch: true,
       watch_debounce_ms: 500,

@@ -5,7 +5,7 @@ import { issueToken } from "../../server/src/auth.ts";
 import { defaultConfig } from "../../server/src/config.ts";
 import { startServer, type RunningServer } from "../../server/src/main.ts";
 import { parseCollectorConfig, type CollectorConfig, type CollectorConfigInput } from "../src/config.ts";
-import { createCollector, type Collector } from "../src/main.ts";
+import { createCollector, type Collector, type CollectorOptions } from "../src/main.ts";
 import type { Logger } from "../src/scanner.ts";
 
 export const MACHINE = "testbox";
@@ -20,7 +20,7 @@ export interface TestEnv {
   port: number;
   logs: string[];
   config(overrides?: Partial<CollectorConfigInput>): CollectorConfig;
-  collector(overrides?: Partial<CollectorConfigInput>): Collector;
+  collector(overrides?: Partial<CollectorConfigInput>, options?: CollectorOptions): Collector;
   /** Writes under a source root, creating directories. Returns the absolute path. */
   write(root: string, relPath: string, content: string | Uint8Array): string;
   archivePath(source: string, relPath: string, generation?: number): string;
@@ -86,8 +86,8 @@ export function createEnv(): TestEnv {
         ...overrides,
       });
     },
-    collector(overrides = {}) {
-      const collector = createCollector(env.config(overrides), { log });
+    collector(overrides = {}, options = {}) {
+      const collector = createCollector(env.config(overrides), { log, ...options });
       collectors.push(collector);
       return collector;
     },

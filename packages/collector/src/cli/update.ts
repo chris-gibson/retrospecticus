@@ -17,6 +17,8 @@ export interface UpdateOptions {
   restartOnly: boolean;
   /** Install the server's version even when this collector is newer. */
   force?: boolean;
+  /** Started by the server's command: refuse unless the config allows remote updates at this moment. */
+  remote?: boolean;
 }
 
 function loadConfig(env: CliEnv, configPath: string): CollectorConfig {
@@ -56,6 +58,9 @@ export async function update(env: CliEnv, options: UpdateOptions): Promise<numbe
   const configPath = resolveCollectorConfigPath(options.config, { env: env.env, home: env.home });
   const config = loadConfig(env, configPath);
 
+  if (options.remote && !config.remote_update) {
+    throw new CliError(`Remote updates are turned off in ${configPath}; not updating.`);
+  }
   if (options.restartOnly) {
     try {
       await restart(env);
@@ -122,8 +127,19 @@ export async function update(env: CliEnv, options: UpdateOptions): Promise<numbe
     if (env.signal.aborted) throw err;
     if (hadPrevious) renameSync(previous, target);
     else rmSync(target, { force: true });
+    const reason = (err as Error).message.split("\n")[0];
+    // A failed restart can leave the service stopped (launchd's fallback boots the agent out first), and a stopped
+    // collector cannot report anything, so try to bring the previous version back up.
+    let recovered = false;
+    if (hadPrevious) {
+      try {
+        recovered = await restartInstalledService(env);
+      } catch {
+        recovered = false;
+      }
+    }
     throw new CliError(
-      `Restarting the service failed, so the previous binary was put back: ${(err as Error).message.split("\n")[0]}. Fix that and run \`retrospecticus-collector update\` again.`,
+      `Restarting the service failed, so the previous binary was put back (${recovered ? "and is running again" : "but the service could not be started; run `retrospecticus-collector install`"}): ${reason}. Fix that and run \`retrospecticus-collector update\` again.`,
     );
   }
   rmSync(previous, { force: true });

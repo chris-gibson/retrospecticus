@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
-import { watch, type FSWatcher } from "node:fs";
-import { hostname } from "node:os";
+import { rmSync, watch, type FSWatcher } from "node:fs";
+import { homedir, hostname } from "node:os";
+import { servicePaths } from "./cli/service.ts";
 import { runCli } from "./cli/index.ts";
 import { realEnv } from "./cli/env.ts";
-import { loadCollectorConfig, readToken, type CollectorConfig } from "./config.ts";
+import { loadCollectorConfig, readToken, resolveCollectorConfigPath, type CollectorConfig } from "./config.ts";
 import { COLLECTOR_VERSION, sendHeartbeat, type CollectorFacts, type SourceStats } from "./heartbeat.ts";
+import { createRemoteUpdater, realUpdateRunner, type UpdateRunner } from "./remote-update.ts";
 import { listSourceFiles, syncFile, type Logger, type SourceFile } from "./scanner.ts";
 import { serviceMode, startStatusServer, type StatusSnapshot } from "./status-page.ts";
 import { StateStore } from "./state.ts";
@@ -27,7 +29,17 @@ export interface CollectorOptions {
   log?: Logger;
   /** Overrides the token file, for callers that already hold the token. */
   token?: string;
+  /** The config file this collector was started from; the update it spawns must read the same one. */
+  configPath?: string;
+  /** Replaces spawning the collector's own `update` command. */
+  runUpdate?: UpdateRunner;
+  /** False pretends to run from source. */
+  compiled?: boolean;
+  /** How long a clean `update` may leave this process running before that is reported as a failure. */
+  updateGraceMs?: number;
 }
+
+const IS_COMPILED = Bun.main.includes("$bunfs") || Bun.main.includes("~BUN");
 
 export interface Collector {
   readonly config: CollectorConfig;
@@ -55,6 +67,26 @@ export function createCollector(config: CollectorConfig, options: CollectorOptio
     machine: config.machine,
     requestTimeoutMs: config.request_timeout_seconds * 1000,
   });
+  const configPath = options.configPath ?? resolveCollectorConfigPath();
+  // Without a file to reread (an in-memory config, as in tests) the setting is the one this collector started with.
+  const remoteUpdateAllowed =
+    options.configPath === undefined
+      ? () => config.remote_update
+      : (): boolean => {
+          try {
+            return loadCollectorConfig(configPath).remote_update;
+          } catch {
+            return false;
+          }
+        };
+  const remoteUpdater = createRemoteUpdater({
+    enabled: remoteUpdateAllowed,
+    compiled: options.compiled ?? IS_COMPILED,
+    configPath,
+    run: options.runUpdate ?? realUpdateRunner,
+    graceMs: options.updateGraceMs ?? 30_000,
+    log,
+  });
   const backoff = new Backoff(config.backoff_min_ms, config.backoff_max_ms);
   const abort = new AbortController();
   const pollMs = config.poll_seconds * 1000;
@@ -74,6 +106,8 @@ export function createCollector(config: CollectorConfig, options: CollectorOptio
   let timerDue = 0;
   let lastHeartbeatAt = Number.NEGATIVE_INFINITY;
   const startedAt = Date.now();
+  // Starting is the proof the new binary works, so the copy an update kept for rollback can go.
+  if (isCompiledBinary() && process.execPath === servicePaths(homedir()).binary) rmSync(`${process.execPath}.prev`, { force: true });
   let lastUploadAt: string | null = null;
   let lastScanAt: string | null = null;
   let lastHeartbeat: { at: string; error: string | null } | null = null;
@@ -102,7 +136,9 @@ export function createCollector(config: CollectorConfig, options: CollectorOptio
       last_upload_at: lastUploadAt,
       last_scan_at: lastScanAt,
       last_error: lastError,
-      exec_path: Bun.main.includes("$bunfs") || Bun.main.includes("~BUN") ? process.execPath : null,
+      exec_path: IS_COMPILED ? process.execPath : null,
+      remote_update: remoteUpdateAllowed(),
+      command_result: remoteUpdater.pendingResult() ?? undefined,
     };
   }
 
@@ -257,12 +293,16 @@ export function createCollector(config: CollectorConfig, options: CollectorOptio
 
     if (Date.now() - lastHeartbeatAt >= heartbeatMs) {
       lastHeartbeatAt = Date.now();
-      const problem = await sendHeartbeat(uploader, lastStats, facts(), abort.signal);
+      const sentResult = remoteUpdater.pendingResult();
+      const { error: problem, command } = await sendHeartbeat(uploader, lastStats, facts(), abort.signal);
       if (!stopped) {
         lastHeartbeat = { at: new Date().toISOString(), error: problem };
         if (problem !== null) {
           log.warn(`heartbeat failed: ${problem}`);
           recordError(`heartbeat failed: ${describeFailure(problem)}`);
+        } else {
+          if (sentResult) remoteUpdater.acknowledge(sentResult);
+          if (command) remoteUpdater.handle(command);
         }
       }
     }
@@ -334,8 +374,9 @@ export function createCollector(config: CollectorConfig, options: CollectorOptio
 }
 
 async function runCollector(configPath: string | undefined): Promise<number> {
-  const config = loadCollectorConfig(configPath);
-  const collector = createCollector(config);
+  const resolvedPath = resolveCollectorConfigPath(configPath);
+  const config = loadCollectorConfig(resolvedPath);
+  const collector = createCollector(config, { configPath: resolvedPath });
   const statusPage = config.status_page.enabled
     ? startStatusServer(() => collector.snapshot(), config.status_page.port, consoleLogger)
     : null;
@@ -357,4 +398,8 @@ if (import.meta.main) {
   process.on("uncaughtException", fatal);
   process.on("unhandledRejection", fatal);
   process.exit(await runCli(process.argv.slice(2), realEnv(runCollector)));
+}
+
+function isCompiledBinary(): boolean {
+  return Bun.main.includes("$bunfs") || Bun.main.includes("~BUN");
 }

@@ -11,6 +11,7 @@ export const KEPT_TABLES = [
   "machines",
   "embedding_models",
   "enroll_requests",
+  "machine_commands",
 ] as const;
 
 export const DERIVED_TABLES = [
@@ -115,6 +116,22 @@ CREATE TABLE IF NOT EXISTS enroll_requests (
   expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS enroll_requests_expires ON enroll_requests (expires_at);
+
+CREATE TABLE IF NOT EXISTS machine_commands (
+  id TEXT PRIMARY KEY,
+  machine TEXT NOT NULL,
+  command TEXT NOT NULL CHECK (command IN ('update')),
+  target_version TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'done', 'failed', 'expired')),
+  message TEXT,
+  created_at TEXT NOT NULL,
+  delivered_at TEXT,
+  delivered_token_id INTEGER,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS machine_commands_machine ON machine_commands (machine, created_at);
+-- Backs the rule that a machine has at most one open command.
+CREATE UNIQUE INDEX IF NOT EXISTS machine_commands_open ON machine_commands (machine) WHERE status IN ('pending', 'delivered');
 `;
 
 export const DERIVED_SCHEMA = `

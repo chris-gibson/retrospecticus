@@ -3,6 +3,7 @@ import { HeartbeatSchema } from "@retrospecticus/shared";
 import type { AppDeps } from "../app.ts";
 import type { AppEnv } from "../auth.ts";
 import { events } from "../events.ts";
+import { applyHeartbeat } from "../db/commands.ts";
 import { recordHeartbeat } from "../db/machines.ts";
 import { readBodyCapped } from "./append.ts";
 
@@ -23,8 +24,13 @@ export function heartbeatHandler(deps: AppDeps): (c: Context<AppEnv>) => Promise
     if (!heartbeat.success) return c.json({ error: "invalid heartbeat" }, 400);
 
     // requireScope guarantees an ingest token carries a machine.
-    recordHeartbeat(deps.db, c.get("token").machine!, heartbeat.data);
+    const token = c.get("token");
+    const machine = token.machine!;
+    recordHeartbeat(deps.db, machine, heartbeat.data);
+    const deliver = applyHeartbeat(deps.db, machine, token.id, heartbeat.data, (deps.now ?? (() => new Date()))());
     events.publish("machines");
-    return c.json({ ok: true });
+    return c.json(
+      deliver ? { ok: true, command: { id: deliver.id, command: deliver.command, version: deliver.target_version } } : { ok: true },
+    );
   };
 }

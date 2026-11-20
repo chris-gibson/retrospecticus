@@ -71,32 +71,32 @@ describe("enroll", () => {
 
   test("--no-install on a TTY prints instructions and does not ask", async () => {
     const { cli, server } = setup({ isTTY: true });
-    cli.answers.push("testbox");
+    cli.answers.push("testbox", "");
     expect(await runCli(["enroll", "--server", server.url, "--no-install"], cli.env)).toBe(0);
-    expect(cli.prompts).toEqual(["Machine name [my-box]: "]);
+    expect(cli.prompts).toEqual(["Machine name [my-box]: ", expect.stringMatching(/^Let http:\/\/127\.0\.0\.1:\d+ update this collector from its admin page\? \[y\/N\] $/)]);
     expect(cli.commands).toEqual([]);
     expect(text(cli.out)).toContain("do this by hand");
   });
 
   test("TTY prompts for the machine name and the service", async () => {
     const { cli, server } = setup({ isTTY: true });
-    cli.answers.push("", "y");
+    cli.answers.push("", "", "y");
     expect(await runCli(["enroll", "--server", server.url], cli.env)).toBe(0);
-    expect(cli.prompts).toEqual(["Machine name [my-box]: ", "Install as a background service that starts at login? [Y/n] "]);
+    expect(cli.prompts).toEqual(["Machine name [my-box]: ", expect.stringMatching(/^Let http:\/\/127\.0\.0\.1:\d+ update this collector from its admin page\? \[y\/N\] $/), "Install as a background service that starts at login? [Y/n] "]);
     expect(server.starts[0]!.machine).toBe("my-box");
     expect(cli.commands.length).toBe(3);
   });
 
   test("declining the service prompt installs nothing", async () => {
     const { cli, server } = setup({ isTTY: true });
-    cli.answers.push("testbox", "n");
+    cli.answers.push("testbox", "", "n");
     expect(await runCli(["enroll", "--server", server.url], cli.env)).toBe(0);
     expect(cli.commands).toEqual([]);
   });
 
   test("Ctrl-D at the service prompt declines instead of installing or failing", async () => {
     const { cli, server } = setup({ isTTY: true });
-    cli.answers.push("testbox", null);
+    cli.answers.push("testbox", "", null);
     expect(await runCli(["enroll", "--server", server.url], cli.env)).toBe(0);
     expect(cli.commands).toEqual([]);
     expect(existsSync(cli.configPath)).toBe(true);
@@ -108,6 +108,99 @@ describe("enroll", () => {
     expect(await runCli(["enroll", "--server", server.url], cli.env)).toBe(1);
     expect(server.starts).toEqual([]);
     expect(existsSync(cli.configPath)).toBe(false);
+  });
+
+  describe("remote updates", () => {
+    const remoteUpdateOf = (cli: TestCli) => JSON.parse(readFileSync(cli.configPath, "utf8")).remote_update;
+
+    test("asks on a TTY, defaults to no, and saves the answer", async () => {
+      const { cli, server } = setup({ isTTY: true });
+      cli.answers.push("testbox", "y", "n");
+      expect(await runCli(["enroll", "--server", server.url], cli.env)).toBe(0);
+      expect(cli.prompts[1]).toEqual(expect.stringMatching(/^Let http:\/\/127\.0\.0\.1:\d+ update this collector from its admin page\? \[y\/N\] $/));
+      expect(remoteUpdateOf(cli)).toBe(true);
+
+      const other = setup({ isTTY: true });
+      other.cli.answers.push("testbox", "", "n");
+      await runCli(["enroll", "--server", other.server.url], other.cli.env);
+      expect(remoteUpdateOf(other.cli)).toBe(false);
+      expect(loadCollectorConfig(other.cli.configPath, { home: other.cli.home, env: {} }).remote_update).toBe(false);
+    });
+
+    test("Ctrl-D at the question means no and enrollment still completes", async () => {
+      const { cli, server } = setup({ isTTY: true });
+      cli.answers.push("testbox", null, "n");
+      expect(await runCli(["enroll", "--server", server.url], cli.env)).toBe(0);
+      expect(remoteUpdateOf(cli)).toBe(false);
+    });
+
+    test("the flags decide without asking, on a TTY or not", async () => {
+      const tty = setup({ isTTY: true });
+      tty.cli.answers.push("testbox");
+      await runCli(["enroll", "--server", tty.server.url, "--no-install", "--remote-update"], tty.cli.env);
+      expect(tty.cli.prompts).toEqual(["Machine name [my-box]: "]);
+      expect(remoteUpdateOf(tty.cli)).toBe(true);
+
+      const plain = setup();
+      await runCli(["enroll", "--server", plain.server.url, "--no-remote-update"], plain.cli.env);
+      expect(plain.cli.prompts).toEqual([]);
+      expect(remoteUpdateOf(plain.cli)).toBe(false);
+    });
+
+    test("a non-interactive enroll without a flag leaves the setting off, and keeps an earlier choice on re-enrolling", async () => {
+      const { cli, server } = setup();
+      await runCli(["enroll", "--server", server.url], cli.env);
+      expect(remoteUpdateOf(cli)).toBeUndefined();
+
+      await runCli(["enroll", "--server", server.url, "--remote-update"], cli.env);
+      await runCli(["enroll", "--server", server.url], cli.env);
+      expect(remoteUpdateOf(cli)).toBe(true);
+    });
+
+    test("re-enrolling on a TTY defaults to the current choice, so Enter keeps remote updates on", async () => {
+      const { cli, server } = setup({ isTTY: true });
+      cli.answers.push("testbox", "y", "n");
+      await runCli(["enroll", "--server", server.url], cli.env);
+      cli.prompts.length = 0;
+      cli.answers.push("testbox", "", "n");
+      await runCli(["enroll", "--server", server.url], cli.env);
+      expect(cli.prompts[1]).toEqual(expect.stringMatching(/^Let http:\/\/127\.0\.0\.1:\d+ update this collector from its admin page\? \[Y\/n\] $/));
+      expect(remoteUpdateOf(cli)).toBe(true);
+    });
+
+    test("consent belongs to one server: enrolling with another starts from off", async () => {
+      const { cli, server } = setup();
+      await runCli(["enroll", "--server", server.url, "--remote-update"], cli.env);
+      expect(remoteUpdateOf(cli)).toBe(true);
+      const other = fakeServer();
+      try {
+        await runCli(["enroll", "--server", other.url], cli.env);
+        expect(remoteUpdateOf(cli)).toBe(false);
+      } finally {
+        other.stop();
+      }
+    });
+
+    test("on a TTY, enrolling with another server asks with no as the default and names the server", async () => {
+      const { cli, server } = setup({ isTTY: true });
+      cli.answers.push("testbox", "y", "n");
+      await runCli(["enroll", "--server", server.url], cli.env);
+      const other = fakeServer();
+      try {
+        cli.prompts.length = 0;
+        cli.answers.push("testbox", "", "n");
+        await runCli(["enroll", "--server", other.url], cli.env);
+        expect(cli.prompts[1]).toBe(`Let ${other.url} update this collector from its admin page? [y/N] `);
+        expect(remoteUpdateOf(cli)).toBe(false);
+      } finally {
+        other.stop();
+      }
+    });
+
+    test("the two flags cannot be combined", async () => {
+      const { cli, server } = setup();
+      expect(await runCli(["enroll", "--server", server.url, "--remote-update", "--no-remote-update"], cli.env)).toBe(2);
+    });
   });
 
   test("denied writes nothing", async () => {
@@ -403,8 +496,10 @@ describe("uninstall", () => {
     const config = loadCollectorConfig(cli.configPath, { home: cli.home, env: {} });
     mkdirSync(dirname(config.state_file), { recursive: true });
     writeFileSync(config.state_file, "{}");
+    // Left behind on Linux when systemd's restart ends a remote update before it tidies up.
+    writeFileSync(`${servicePaths(cli.home).binary}.prev`, "old");
     expect(await runCli(["uninstall", "--purge"], cli.env)).toBe(0);
-    for (const path of [config.token_file, config.state_file, cli.configPath, servicePaths(cli.home).binary]) {
+    for (const path of [config.token_file, config.state_file, cli.configPath, servicePaths(cli.home).binary, `${servicePaths(cli.home).binary}.prev`]) {
       expect(existsSync(path)).toBe(false);
     }
   });
@@ -731,6 +826,35 @@ describe("update", () => {
     expect(cli.commands.map((c) => c[1])).toEqual(["kickstart", "bootout", "bootstrap"]);
   });
 
+  test("a remote update refuses when the config no longer allows it", async () => {
+    const { cli, server } = await installed();
+    server.version = "9.9.9";
+    server.binary = Buffer.from(NEW_BINARY);
+    server.sums = sumsFor(NEW_BINARY);
+    expect(await runCli(["update", "--remote"], cli.env)).toBe(1);
+    expect(text(cli.err)).toContain("Remote updates are turned off");
+    expect(readFileSync(servicePaths(cli.home).binary, "utf8")).not.toBe(NEW_BINARY);
+  });
+
+  test("after a failed restart puts the old binary back, it starts the service again and says whether that worked", async () => {
+    const { cli, server } = await installed();
+    server.version = "9.9.9";
+    server.binary = Buffer.from(NEW_BINARY);
+    server.sums = sumsFor(NEW_BINARY);
+    let restarts = 0;
+    const run = cli.env.run;
+    cli.env.run = async (cmd) => {
+      if (cmd.join(" ").includes("restart")) return ++restarts === 1 ? { code: 1, stdout: "", stderr: "boom" } : { code: 0, stdout: "", stderr: "" };
+      return run(cmd);
+    };
+    expect(await runCli(["update"], cli.env)).toBe(1);
+    expect(restarts).toBe(2);
+    expect(text(cli.err)).toContain("and is running again");
+    cli.env.run = async (cmd) => (cmd.join(" ").includes("restart") ? { code: 1, stdout: "", stderr: "boom" } : run(cmd));
+    expect(await runCli(["update"], cli.env)).toBe(1);
+    expect(text(cli.err)).toContain("the service could not be started");
+  });
+
   test("a failed restart puts the previous binary back, so a retry updates again", async () => {
     const { cli, server } = await installed();
     const { binary } = servicePaths(cli.home);
@@ -846,5 +970,62 @@ describe("status --enrolled-with", () => {
     await configured(cli, server);
     const port = new URL(server.url).port;
     expect(await runCli(["status", "--enrolled-with", `HTTP://127.0.0.1:${port}/`], cli.env)).toBe(0);
+  });
+});
+
+describe("remote-update", () => {
+  async function enrolled(extra: Record<string, unknown> = {}) {
+    const { cli, server } = setup();
+    mkdirSync(dirname(cli.configPath), { recursive: true });
+    writeFileSync(
+      cli.configPath,
+      JSON.stringify({ server_url: server.url, machine: "testbox", token_file: join(cli.home, "token"), poll_seconds: 45, ...extra }),
+    );
+    return { cli, server };
+  }
+  const saved = (cli: TestCli) => JSON.parse(readFileSync(cli.configPath, "utf8"));
+
+  test("on turns the setting on and keeps the other settings, with no restart needed", async () => {
+    const { cli } = await enrolled();
+    expect(await runCli(["remote-update", "on"], cli.env)).toBe(0);
+    expect(saved(cli)).toMatchObject({ remote_update: true, poll_seconds: 45, machine: "testbox" });
+    expect(text(cli.out)).toContain("now on");
+    expect(text(cli.out)).toContain("from its next heartbeat");
+    expect(cli.commands).toEqual([]);
+    expect(mode(cli.configPath)).toBe(0o600);
+  });
+
+  test("off turns it off without restarting the service: the running collector rereads it", async () => {
+    const { cli } = await enrolled({ remote_update: true });
+    mkdirSync(dirname(servicePaths(cli.home).unit), { recursive: true });
+    writeFileSync(servicePaths(cli.home).unit, "[Unit]\n");
+    expect(await runCli(["remote-update", "off"], cli.env)).toBe(0);
+    expect(saved(cli).remote_update).toBe(false);
+    expect(cli.commands).toEqual([]);
+  });
+
+  test("says so and restarts nothing when the setting is already as asked", async () => {
+    const { cli } = await enrolled({ remote_update: true });
+    expect(await runCli(["remote-update", "on"], cli.env)).toBe(0);
+    expect(text(cli.out)).toContain("already on");
+    expect(cli.commands).toEqual([]);
+  });
+
+  test("takes --config, and needs on or off", async () => {
+    const { cli } = await enrolled();
+    const elsewhere = join(cli.home, "other.json");
+    writeFileSync(elsewhere, readFileSync(cli.configPath));
+    expect(await runCli(["remote-update", "on", "--config", elsewhere], cli.env)).toBe(0);
+    expect(JSON.parse(readFileSync(elsewhere, "utf8")).remote_update).toBe(true);
+    expect(saved(cli).remote_update).toBeUndefined();
+
+    expect(await runCli(["remote-update"], cli.env)).toBe(2);
+    expect(await runCli(["remote-update", "maybe"], cli.env)).toBe(2);
+  });
+
+  test("fails clearly when the collector is not enrolled", async () => {
+    const { cli } = setup();
+    expect(await runCli(["remote-update", "on"], cli.env)).toBe(1);
+    expect(text(cli.err)).toContain("enroll");
   });
 });

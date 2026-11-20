@@ -19,6 +19,8 @@ export interface MachineRow {
   last_error: string | null;
   /** Where the collector's executable is, as it reported it. */
   exec_path: string | null;
+  /** 1 when the collector's config lets the server update it; null until a collector that knows the setting reports. */
+  remote_update: number | null;
 }
 
 const MAX_ERROR_CHARS = 300;
@@ -29,8 +31,8 @@ export function recordHeartbeat(db: Db, machine: string, heartbeat: Heartbeat): 
     : null;
   db.run(
     `INSERT INTO machines (machine, collector_version, last_heartbeat_at, sources,
-       hostname, platform, started_at, last_upload_at, last_scan_at, last_error, exec_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       hostname, platform, started_at, last_upload_at, last_scan_at, last_error, exec_path, remote_update)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (machine) DO UPDATE SET
        collector_version = excluded.collector_version,
        last_heartbeat_at = excluded.last_heartbeat_at,
@@ -41,7 +43,8 @@ export function recordHeartbeat(db: Db, machine: string, heartbeat: Heartbeat): 
        last_upload_at = excluded.last_upload_at,
        last_scan_at = excluded.last_scan_at,
        last_error = excluded.last_error,
-       exec_path = excluded.exec_path`,
+       exec_path = excluded.exec_path,
+       remote_update = excluded.remote_update`,
     [
       machine,
       heartbeat.collector_version,
@@ -54,6 +57,7 @@ export function recordHeartbeat(db: Db, machine: string, heartbeat: Heartbeat): 
       heartbeat.last_scan_at ?? null,
       error,
       heartbeat.exec_path ?? null,
+      heartbeat.remote_update === undefined ? null : heartbeat.remote_update ? 1 : 0,
     ],
   );
 }

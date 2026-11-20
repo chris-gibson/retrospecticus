@@ -2,17 +2,17 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
-import { ADMIN_PAGE_PATH, VERSION, compareVersions } from "@retrospecticus/shared";
+import { ADMIN_PAGE_PATH } from "@retrospecticus/shared";
 import { hashToken, issueToken, type AppEnv } from "../auth.ts";
 import { getEnrollRequest, listLivePending, settleEnrollRequest, type EnrollRequestRow } from "../db/enroll.ts";
 import type { Db } from "../db/index.ts";
-import { listMachineSummaries } from "../db/machines.ts";
 import { getTokenByHash, getTokenById, listTokens, revokeToken, touchToken, type TokenRow } from "../db/tokens.ts";
 import type { ConfigStore, ConfigView } from "../config-store.ts";
 import { readJsonBody } from "../enroll.ts";
 import { events } from "../events.ts";
 import { registerEventsRoute, type EventStreamOptions, type SessionWatch } from "./events.ts";
 import { ADMIN_PAGE_CSP, ADMIN_PAGE_HTML } from "./page.ts";
+import { registerMachineRoutes } from "./machines.ts";
 import { registerDriftRoutes, type DriftRouteDeps } from "./drift.ts";
 import { registerProbeRoutes, type ProbeDeps } from "./probes.ts";
 import { registerSettingsRoutes } from "./settings.ts";
@@ -254,18 +254,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: AdminDeps): void {
   registerDriftRoutes(app, { db, view: deps.config, store: deps.configStore, wiring: deps.wiring, maxBodyBytes: MAX_ADMIN_BODY_BYTES });
   registerProbeRoutes(app, { view: deps.config, maxBodyBytes: MAX_ADMIN_BODY_BYTES, timeoutsMs: deps.probeTimeoutsMs });
 
-  app.get(`${API}/machines`, (c) =>
-    c.json({
-      // Only older collectors are outdated: `update` will not downgrade a newer one.
-      machines: listMachineSummaries(db).map((m) => ({
-        ...m,
-        outdated: m.collector_version !== null && (compareVersions(m.collector_version, VERSION) ?? 0) < 0,
-        // Collectors that report where they run from also have the update command; older ones need the installer.
-        install_dir: m.exec_path ? m.exec_path.slice(0, m.exec_path.lastIndexOf("/")) || "/" : null,
-      })),
-      server_version: VERSION,
-    }),
-  );
+  registerMachineRoutes(app, { db, now });
 
   app.get(`${API}/tokens`, (c) => c.json({ tokens: listTokens(db).map(publicToken) }));
 
