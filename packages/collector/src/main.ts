@@ -102,6 +102,7 @@ export function createCollector(config: CollectorConfig, options: CollectorOptio
       last_upload_at: lastUploadAt,
       last_scan_at: lastScanAt,
       last_error: lastError,
+      exec_path: Bun.main.includes("$bunfs") || Bun.main.includes("~BUN") ? process.execPath : null,
     };
   }
 

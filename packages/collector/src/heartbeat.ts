@@ -20,6 +20,7 @@ export interface CollectorFacts {
   last_upload_at: string | null;
   last_scan_at: string | null;
   last_error: { at: string; message: string } | null;
+  exec_path: string | null;
 }
 
 export function buildHeartbeat(sources: readonly SourceStats[], facts?: CollectorFacts): Heartbeat {

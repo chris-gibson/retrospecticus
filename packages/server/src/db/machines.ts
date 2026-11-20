@@ -17,6 +17,8 @@ export interface MachineRow {
   last_scan_at: string | null;
   /** JSON `{ at, message }` of the collector's latest problem, or null. */
   last_error: string | null;
+  /** Where the collector's executable is, as it reported it. */
+  exec_path: string | null;
 }
 
 const MAX_ERROR_CHARS = 300;
@@ -27,8 +29,8 @@ export function recordHeartbeat(db: Db, machine: string, heartbeat: Heartbeat): 
     : null;
   db.run(
     `INSERT INTO machines (machine, collector_version, last_heartbeat_at, sources,
-       hostname, platform, started_at, last_upload_at, last_scan_at, last_error)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       hostname, platform, started_at, last_upload_at, last_scan_at, last_error, exec_path)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (machine) DO UPDATE SET
        collector_version = excluded.collector_version,
        last_heartbeat_at = excluded.last_heartbeat_at,
@@ -38,7 +40,8 @@ export function recordHeartbeat(db: Db, machine: string, heartbeat: Heartbeat): 
        started_at = excluded.started_at,
        last_upload_at = excluded.last_upload_at,
        last_scan_at = excluded.last_scan_at,
-       last_error = excluded.last_error`,
+       last_error = excluded.last_error,
+       exec_path = excluded.exec_path`,
     [
       machine,
       heartbeat.collector_version,
@@ -50,6 +53,7 @@ export function recordHeartbeat(db: Db, machine: string, heartbeat: Heartbeat): 
       heartbeat.last_upload_at ?? null,
       heartbeat.last_scan_at ?? null,
       error,
+      heartbeat.exec_path ?? null,
     ],
   );
 }

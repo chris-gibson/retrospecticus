@@ -23,6 +23,7 @@ export const ADMIN_COOKIE = "retrospecticus_admin";
 export const ADMIN_CSRF_HEADER = "X-Retrospecticus-Admin";
 export const ADMIN_SESSION_SECONDS = 12 * 60 * 60;
 const API = `${ADMIN_PAGE_PATH}/api`;
+
 const MAX_ADMIN_BODY_BYTES = 16 * 1024;
 
 export interface AdminDeps {
@@ -259,6 +260,8 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: AdminDeps): void {
       machines: listMachineSummaries(db).map((m) => ({
         ...m,
         outdated: m.collector_version !== null && (compareVersions(m.collector_version, VERSION) ?? 0) < 0,
+        // Collectors that report where they run from also have the update command; older ones need the installer.
+        install_dir: m.exec_path ? m.exec_path.slice(0, m.exec_path.lastIndexOf("/")) || "/" : null,
       })),
       server_version: VERSION,
     }),

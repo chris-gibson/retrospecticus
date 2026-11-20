@@ -278,7 +278,11 @@ trap - EXIT
 echo "Installed $target"
 case ":$PATH:" in
   *":$bindir:"*) ;;
-  *) echo "Note: $bindir is not on your PATH." ;;
+  *)
+    echo "Note: $bindir is not on your PATH, so run the collector as '$target',"
+    echo "or add the directory to your shell's startup file (~/.zshrc on macOS, ~/.profile or ~/.bashrc on Linux):"
+    echo '  export PATH="$HOME/.local/bin:$PATH"'
+    ;;
 esac
 
 # A machine already enrolled here keeps its token: the new binary only needs the service restarted.

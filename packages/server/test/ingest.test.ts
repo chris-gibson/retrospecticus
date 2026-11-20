@@ -338,6 +338,13 @@ describe("heartbeat", () => {
     expect(JSON.parse(row.sources!)).toEqual(heartbeat.sources);
   });
 
+  test("stores where the collector runs from, and accepts heartbeats from collectors that do not say", async () => {
+    expect((await post({ ...heartbeat, exec_path: "/home/a/.local/bin/retrospecticus-collector" })).status).toBe(200);
+    expect(getMachine(h.db, "laptop")!.exec_path).toBe("/home/a/.local/bin/retrospecticus-collector");
+    expect((await post(heartbeat)).status).toBe(200);
+    expect(getMachine(h.db, "laptop")!.exec_path).toBeNull();
+  });
+
   test("a heartbeat does not erase the last ingest time, nor an ingest the heartbeat", async () => {
     await h.append({ token, body: "x\n" });
     await post(heartbeat);
