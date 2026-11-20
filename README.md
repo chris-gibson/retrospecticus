@@ -55,10 +55,10 @@ The image holds only the compiled server executable and `sqlite-vec` on `debian:
    ```
 
    ```
-   First-time setup: open http://<this server's address>:7878/admin/setup?code=QWM6-5RZS-6FVV-SD9M
+   First-time setup: open http://192.168.1.10:7878/admin/setup?code=QWM6-5RZS-6FVV-SD9M
    ```
 
-   Replace the placeholder with the server's name or address on your private network and open the link. Use the name you want collectors to use: the install command and the address each collector saves come from the address you open the admin page with. Only someone who can read the server's logs has the code, and it stops working once setup is done.
+   The link uses `RETROSPECTICUS_BIND` from `.env` (or, run without Docker on every interface, one line per address of the machine), so it can be clicked as is. If it shows `<this server's address>` instead, an older `compose.yaml` is missing the `environment:` entry; put the address in yourself. To use a DNS name, swap it in for the address. Use the name you want collectors to use: the install command and the address each collector saves come from the address you open the admin page with. Only someone who can read the server's logs has the code, and it stops working once setup is done.
 
 ### First-time setup
 

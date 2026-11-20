@@ -1,4 +1,5 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { ADMIN_PAGE_PATH, MAX_APPEND_BODY_BYTES } from "@retrospecticus/shared";
 import { createSetupState } from "./admin/setup.ts";
 import { createApp, type AppDeps } from "./app.ts";
@@ -12,6 +13,7 @@ import { reconcileArchive } from "./ingest/archive.ts";
 import type { SecretName } from "./secrets.ts";
 import { events } from "./events.ts";
 import { buildWiring } from "./wiring.ts";
+import { setupHosts } from "./setup-hosts.ts";
 
 export interface RunningServer {
   db: Db;
@@ -36,6 +38,10 @@ export interface StartServerOptions {
   indexer?: false | Pick<IndexerDeps, "parsers" | "observers" | "stages" | "pollSeconds" | "parse" | "onError">;
   /** Where the first-run setup link is written when no admin token exists. Defaults to console.log. */
   log?: (line: string) => void;
+  /** Overrides for choosing the setup link's address; tests set them, the server reads its own environment. */
+  env?: Record<string, string | undefined>;
+  interfaces?: NodeJS.Dict<NetworkInterfaceInfo[]>;
+  inContainer?: boolean;
 }
 
 /**
@@ -101,14 +107,19 @@ export function startServer(source: ServerConfig | ConfigView, options: StartSer
     fetch: app.fetch,
   });
   const port = server.port ?? config.listen_port;
-  const host = config.listen_host.includes(":") ? `[${config.listen_host}]` : config.listen_host;
   if (setupCode !== null) {
     const log = options.log ?? ((line: string) => console.log(line));
-    // A wildcard bind address is not somewhere a browser can go, so name the slot rather than print it.
-    const reachable = config.listen_host === "0.0.0.0" || config.listen_host === "::" ? "<this server's address>" : host;
+    const hosts = setupHosts({
+      listenHost: config.listen_host,
+      bind: options.env?.RETROSPECTICUS_BIND ?? process.env.RETROSPECTICUS_BIND,
+      interfaces: options.interfaces ?? networkInterfaces(),
+      inContainer: options.inContainer ?? existsSync("/.dockerenv"),
+    });
+    const url = (host: string) => `http://${host}:${port}${ADMIN_PAGE_PATH}/setup?code=${setupCode}`;
     // Deferred so it follows the caller's own "listening on" line rather than preceding it.
     queueMicrotask(() => {
-      log(`First-time setup: open http://${reachable}:${port}${ADMIN_PAGE_PATH}/setup?code=${setupCode}`);
+      log(`First-time setup: open ${url(hosts[0]!)}`);
+      for (const host of hosts.slice(1)) log(`  or ${url(host)}`);
       log(setupCode);
     });
   }
@@ -118,7 +129,7 @@ export function startServer(source: ServerConfig | ConfigView, options: StartSer
     config: view,
     hostname: config.listen_host,
     port,
-    url: `http://${host}:${port}`,
+    url: `http://${config.listen_host.includes(":") ? `[${config.listen_host}]` : config.listen_host}:${port}`,
     indexer,
     async stop() {
       stopWatchingConfig();

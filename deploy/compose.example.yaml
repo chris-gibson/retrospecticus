@@ -12,6 +12,9 @@ services:
       # Published on one private address only, never on 0.0.0.0. Set it in .env next to this file, e.g.
       # RETROSPECTICUS_BIND=192.168.1.10 (LAN), a Tailscale IP, or another overlay's address. See Networking in the README.
       - "${RETROSPECTICUS_BIND:?set RETROSPECTICUS_BIND in .env to the private address to publish on}:7878:7878"
+    environment:
+      # Lets the first-run setup link in `docker logs` name this address instead of a placeholder.
+      RETROSPECTICUS_BIND: ${RETROSPECTICUS_BIND}
     # Only if the server must reach machines by names that just your private network's DNS knows (e.g. Ollama on another box):
     # dns:
     #   - 192.168.1.1        # your resolver; 100.100.100.100 for Tailscale

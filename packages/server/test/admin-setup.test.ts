@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { dbPath, defaultConfig } from "../src/config.ts";
 import { openDb } from "../src/db/index.ts";
-import { startServer } from "../src/main.ts";
+import { startServer, type StartServerOptions } from "../src/main.ts";
 import { createApp } from "../src/app.ts";
 import { hashToken, issueToken } from "../src/auth.ts";
 import { createSetupState, generateSetupCode, normalizeSetupCode, type SetupState } from "../src/admin/setup.ts";
@@ -157,7 +157,7 @@ describe("page", () => {
 });
 
 describe("startServer", () => {
-  async function started(listenHost: string, seedAdmin = false) {
+  async function started(listenHost: string, seedAdmin = false, where: Pick<StartServerOptions, "env" | "inContainer"> = { env: {}, inContainer: true }) {
     const config = defaultConfig({ data_dir: h.dataDir, listen_host: listenHost, listen_port: 0 });
     if (seedAdmin) {
       mkdirSync(dirname(dbPath(config)), { recursive: true });
@@ -166,7 +166,7 @@ describe("startServer", () => {
       db.close();
     }
     const lines: string[] = [];
-    const server = startServer(config, { indexer: false, log: (line) => lines.push(line) });
+    const server = startServer(config, { indexer: false, log: (line) => lines.push(line), ...where });
     await Bun.sleep(0);
     return { server, lines };
   }
@@ -192,6 +192,15 @@ describe("startServer", () => {
     const { server, lines } = await started("0.0.0.0");
     try {
       expect(lines[0]).toMatch(/^First-time setup: open http:\/\/<this server's address>:\d+\/admin\/setup\?code=[A-Z0-9-]{19}$/);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("prints the address compose publishes on, so the link can be clicked", async () => {
+    const { server, lines } = await started("0.0.0.0", false, { env: { RETROSPECTICUS_BIND: "100.64.0.7" }, inContainer: true });
+    try {
+      expect(lines[0]).toMatch(/^First-time setup: open http:\/\/100\.64\.0\.7:\d+\/admin\/setup\?code=[A-Z0-9-]{19}$/);
     } finally {
       await server.stop();
     }
