@@ -111,7 +111,7 @@ To update, run `docker compose pull && docker compose up -d` in `<deploy-dir>`. 
 Each release has the server for Linux as `retrospecticus-server-linux-x64.tar.gz` and `retrospecticus-server-linux-arm64.tar.gz`: the executable, `sqlite-vec` (`vec0.so`, which must stay beside it), the systemd unit, an example config, `LICENSE` and the third-party notices. Download the one for the server's CPU (`uname -m`: `x86_64` is x64, `aarch64` is arm64), check it and install it:
 
 ```sh
-v=0.1.1 arch=x64
+v=0.2.0 arch=x64
 base=https://github.com/chris-gibson/retrospecticus/releases/download/v$v
 curl -fsSLO "$base/retrospecticus-server-linux-$arch.tar.gz" -O "$base/SHA256SUMS"
 sha256sum --ignore-missing -c SHA256SUMS
