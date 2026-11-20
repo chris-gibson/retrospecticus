@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { ENROLL_TTL_SECONDS, EnrollPollResponseSchema, SEARCH_PATH } from "@retrospecticus/shared";
+import { ENROLL_TTL_SECONDS, EnrollPollResponseSchema, SEARCH_PATH, VERSION } from "@retrospecticus/shared";
 import { hashToken, issueToken } from "../src/auth.ts";
 import { listFiles } from "../src/db/files.ts";
 import { getTokenById, listTokens, revokeToken } from "../src/db/tokens.ts";
@@ -309,6 +309,14 @@ describe("machines and tokens", () => {
       ["desktop", 0],
       ["laptop", 1],
     ]);
+    expect(((await (await adminGet(clock.app, "/admin/api/machines", cookie)).json()) as { server_version: string }).server_version).toBe(VERSION);
+  });
+
+  test("only collectors older than the server are outdated", async () => {
+    const { cookie } = await adminSession(clock.app, h);
+    h.db.run("INSERT INTO machines (machine, collector_version) VALUES ('old', '0.0.1'), ('same', ?), ('newer', '99.0.0'), ('odd', 'dev'), ('none', NULL)", [VERSION]);
+    const { machines } = (await (await adminGet(clock.app, "/admin/api/machines", cookie)).json()) as { machines: Array<Record<string, unknown>> };
+    expect(Object.fromEntries(machines.map((m) => [m.machine, m.outdated]))).toEqual({ newer: false, none: false, odd: false, old: true, same: false });
   });
 
   test("machines include what the collector reported about itself", async () => {

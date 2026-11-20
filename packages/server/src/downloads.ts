@@ -231,7 +231,8 @@ export function registerDownloadRoutes(app: Hono<AppEnv>, deps: DownloadDeps): v
 /** POSIX sh, so it runs from `curl | sh` on Linux and macOS alike. */
 export function installScript(origin: string): string {
   return `#!/bin/sh
-# Installs the retrospecticus collector from ${origin} and enrolls this machine.
+# Installs the retrospecticus collector from ${origin} and enrolls this machine,
+# or updates it when this machine is already enrolled here.
 #   curl -fsSL ${origin}/install.sh | sh
 set -eu
 
@@ -249,7 +250,9 @@ esac
 name="retrospecticus-collector-$os-$arch"
 bindir="$HOME/.local/bin"
 target="$bindir/retrospecticus-collector"
-tmp=$(mktemp)
+# Staged next to the target, so the final mv is a rename on one filesystem and never leaves a half-copied binary.
+mkdir -p "$bindir"
+tmp=$(mktemp "$bindir/.retrospecticus-collector.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 
 echo "Downloading $name from $server"
@@ -269,7 +272,6 @@ if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
   exit 1
 fi
 
-mkdir -p "$bindir"
 chmod 755 "$tmp"
 mv "$tmp" "$target"
 trap - EXIT
@@ -277,6 +279,25 @@ echo "Installed $target"
 case ":$PATH:" in
   *":$bindir:"*) ;;
   *) echo "Note: $bindir is not on your PATH." ;;
+esac
+
+# A machine already enrolled here keeps its token: the new binary only needs the service restarted.
+# 1 means not enrolled, and 2 is a collector too old to know the check, which enrolls as it always did.
+# Anything else (server down, unreadable config) must not lead to a second enrollment.
+enrolled=0
+"$target" status --enrolled-with "$server" >/dev/null 2>&1 || enrolled=$?
+case $enrolled in
+  0)
+    "$target" update --restart-only
+    echo "Updated; this machine was already enrolled with $server."
+    exit 0
+    ;;
+  1|2) ;;
+  *)
+    echo "Could not check whether this machine is already enrolled with $server (is the server reachable?)." >&2
+    echo "The new binary is installed. Run the command again, or enroll by hand: $target enroll --server $server" >&2
+    exit 1
+    ;;
 esac
 
 # Standard input is this script when piped from curl, so enrollment reads from the terminal instead.

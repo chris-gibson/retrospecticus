@@ -6,6 +6,8 @@ import {
   ENROLL_START_PATH,
   EnrollStartRequestSchema,
   HEARTBEAT_PATH,
+  TOKEN_REVOKE_SELF_PATH,
+  TOKEN_WHOAMI_PATH,
   type EnrollStartRequest,
 } from "@retrospecticus/shared";
 import { PromptClosed, type CliEnv, type RunResult } from "../src/cli/env.ts";
@@ -24,6 +26,17 @@ export interface FakeServer {
   starts: EnrollStartRequest[];
   polls: number;
   heartbeats: { authorization: string | null; machine: string | null }[];
+  /** What /healthz reports. */
+  version: string;
+  /** Served at /downloads/SHA256SUMS and /downloads/collector/<platform>; unset answers 404. */
+  sums: string | null;
+  binary: Uint8Array | null;
+  revokes: { authorization: string | null; machine: string | null }[];
+  revokeStatus: number;
+  /** Overrides the whoami answer for a valid token, to stand in for a failing server. */
+  whoamiStatus: number;
+  /** Answer the token routes with a proxy's HTML page and 200, as a misrouted reverse proxy would. */
+  proxyPage: boolean;
   startStatus: number;
   startBody: string | null;
   pollScript: PollStep[];
@@ -37,6 +50,13 @@ export function fakeServer(machine = "testbox"): FakeServer {
     starts: [],
     polls: 0,
     heartbeats: [],
+    version: "0.0.0-server",
+    sums: null,
+    binary: null,
+    revokes: [],
+    revokeStatus: 200,
+    whoamiStatus: 200,
+    proxyPage: false,
     startStatus: 200,
     startBody: null,
     pollScript: [{ status: "pending" }, { status: "approved", token: "rt_faketoken123", machine }],
@@ -47,7 +67,16 @@ export function fakeServer(machine = "testbox"): FakeServer {
     hostname: "127.0.0.1",
     async fetch(req) {
       const path = new URL(req.url).pathname;
-      if (path === "/healthz") return Response.json({ ok: true });
+      if (path === "/healthz") return Response.json({ ok: true, version: state.version });
+      if (path === "/downloads/SHA256SUMS") return state.sums === null ? new Response("no", { status: 404 }) : new Response(state.sums);
+      if (path.startsWith("/downloads/collector/")) return state.binary === null ? new Response("no", { status: 404 }) : new Response(state.binary);
+      if (state.proxyPage && (path === TOKEN_WHOAMI_PATH || path === TOKEN_REVOKE_SELF_PATH)) {
+        return new Response("<html>Welcome to nginx</html>", { status: 200, headers: { "Content-Type": "text/html" } });
+      }
+      if (path === TOKEN_REVOKE_SELF_PATH) {
+        state.revokes.push({ authorization: req.headers.get("authorization"), machine: req.headers.get("x-machine") });
+        return state.revokeStatus === 200 ? Response.json({ result: "revoked" }) : new Response("{}", { status: state.revokeStatus });
+      }
       if (path === ENROLL_START_PATH) {
         const parsed = EnrollStartRequestSchema.safeParse(await req.json());
         if (!parsed.success) return Response.json({ error: "bad machine" }, { status: 400 });
@@ -67,6 +96,11 @@ export function fakeServer(machine = "testbox"): FakeServer {
         if ("garbage" in step) return new Response("<html>", { status: 200 });
         if ("http" in step) return new Response("nope", { status: step.http });
         return Response.json(step);
+      }
+      if (path === TOKEN_WHOAMI_PATH) {
+        if (req.headers.get("authorization") !== `Bearer ${state.token}`) return new Response("no", { status: 401 });
+        if (req.headers.get("x-machine") !== machine) return new Response("wrong machine", { status: 403 });
+        return state.whoamiStatus === 200 ? Response.json({ machine }) : new Response("down", { status: state.whoamiStatus });
       }
       if (path === HEARTBEAT_PATH) {
         const authorization = req.headers.get("authorization");

@@ -15,6 +15,10 @@ export type TokenScope = (typeof TOKEN_SCOPES)[number];
 
 export const INGEST_APPEND_PATH = "/v1/ingest/append";
 export const HEARTBEAT_PATH = "/v1/heartbeat";
+/** An ingest token calls this to revoke itself, as `uninstall --purge` does before deleting it. */
+export const TOKEN_REVOKE_SELF_PATH = "/v1/token/revoke";
+/** Answers 200 only while the calling ingest token is accepted for the machine it names; changes nothing. */
+export const TOKEN_WHOAMI_PATH = "/v1/token/whoami";
 export const SEARCH_PATH = "/v1/search";
 export const MCP_PATH = "/mcp";
 
@@ -131,3 +135,4 @@ export const EnrollPollResponseSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("approved"), token: z.string(), machine: z.string() }),
 ]);
 export type EnrollPollResponse = z.infer<typeof EnrollPollResponseSchema>;
+export { compareVersions } from "./versions.ts";

@@ -379,3 +379,34 @@ describe("surface", () => {
     }
   });
 });
+
+describe("whoami", () => {
+  test("answers 200 for the machine's own token and changes nothing", async () => {
+    const get = (t: string, machine = "laptop") => h.app.request("/v1/token/whoami", { headers: { Authorization: `Bearer ${t}`, "X-Machine": machine } });
+    const res = await get(token);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ machine: "laptop" });
+    expect((await get(token, "desktop")).status).toBe(403);
+    expect((await get("rt_nope")).status).toBe(401);
+    expect((await get(h.token("search"))).status).toBe(403);
+    expect((await h.append({ token, body: "x\n" })).status).toBe(200);
+  });
+});
+
+describe("self-revoke", () => {
+  test("an ingest token revokes itself and is refused afterwards", async () => {
+    const post = (t: string) =>
+      h.app.request("/v1/token/revoke", { method: "POST", headers: { Authorization: `Bearer ${t}`, "X-Machine": "laptop" } });
+    const other = h.token("ingest", "desktop");
+    expect(await (await post(token)).json()).toEqual({ result: "revoked" });
+    expect((await post(token)).status).toBe(401);
+    expect((await h.append({ token, body: "x\n" })).status).toBe(401);
+    expect((await h.append({ token: other, machine: "desktop", body: "x\n" })).status).toBe(200);
+  });
+
+  test("other scopes and missing tokens cannot use it", async () => {
+    const search = h.token("search");
+    expect((await h.app.request("/v1/token/revoke", { method: "POST", headers: { Authorization: `Bearer ${search}` } })).status).toBe(403);
+    expect((await h.app.request("/v1/token/revoke", { method: "POST" })).status).toBe(401);
+  });
+});

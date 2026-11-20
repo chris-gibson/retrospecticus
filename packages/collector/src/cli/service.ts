@@ -1,7 +1,8 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { loadCollectorConfig } from "../config.ts";
-import { CliError, type CliEnv } from "./env.ts";
+import { HEADER_MACHINE, TOKEN_REVOKE_SELF_PATH } from "@retrospecticus/shared";
+import { loadCollectorConfig, type CollectorConfig } from "../config.ts";
+import { CliError, timeoutSignal, type CliEnv } from "./env.ts";
 
 export const SERVICE_NAME = "retrospecticus-collector";
 export const LAUNCHD_LABEL = "com.retrospecticus.collector";
@@ -10,6 +11,8 @@ export interface PlannedCommand {
   argv: string[];
   /** launchctl bootout fails when nothing is loaded, which is fine. */
   ignoreFailure?: boolean;
+  /** launchctl bootout returns before the job has gone, so a bootstrap right after it can fail with error 5 for a moment. */
+  retries?: number;
 }
 
 export interface PlannedFile {
@@ -97,6 +100,15 @@ ${args}
 `;
 }
 
+/** The commands that make the service run whatever binary and config are in place now. */
+function restartCommands(env: CliEnv, plist: string): PlannedCommand[] {
+  if (env.platform === "linux") return [{ argv: ["systemctl", "--user", "restart", SERVICE_NAME] }];
+  return [
+    { argv: ["launchctl", "bootout", `gui/${env.uid}/${LAUNCHD_LABEL}`], ignoreFailure: true },
+    { argv: ["launchctl", "bootstrap", `gui/${env.uid}`, plist], retries: 5 },
+  ];
+}
+
 export function planInstall(env: CliEnv, configPath: string): ServicePlan {
   const paths = servicePaths(env.home);
   const notes: string[] = [];
@@ -124,7 +136,7 @@ export function planInstall(env: CliEnv, configPath: string): ServicePlan {
         { argv: ["systemctl", "--user", "daemon-reload"] },
         { argv: ["systemctl", "--user", "enable", SERVICE_NAME] },
         // Restart rather than start, so a re-enrolled machine picks up its new token and binary.
-        { argv: ["systemctl", "--user", "restart", SERVICE_NAME] },
+        ...restartCommands(env, paths.plist),
       ],
       notes: [...notes, "To keep it running while you are logged out: loginctl enable-linger $USER"],
     };
@@ -137,10 +149,7 @@ export function planInstall(env: CliEnv, configPath: string): ServicePlan {
       files: [
         { path: paths.plist, content: launchdPlist(runArgv, paths.log), dir: dirname(paths.plist) },
       ],
-      commands: [
-        { argv: ["launchctl", "bootout", `gui/${env.uid}/${LAUNCHD_LABEL}`], ignoreFailure: true },
-        { argv: ["launchctl", "bootstrap", `gui/${env.uid}`, paths.plist] },
-      ],
+      commands: restartCommands(env, paths.plist),
       notes: [...notes, `Logs: ${paths.log}`],
     };
   }
@@ -176,6 +185,34 @@ function failure(result: { stderr: string; stdout: string; code: number }): stri
   return text ? text : `exit code ${result.code}`;
 }
 
+async function runPlanned(env: CliEnv, commands: readonly PlannedCommand[]): Promise<void> {
+  for (const command of commands) {
+    let result = await env.run(command.argv);
+    for (let left = command.retries ?? 0; result.code !== 0 && left > 0; left--) {
+      await env.sleep(1000, env.signal);
+      result = await env.run(command.argv);
+    }
+    if (result.code !== 0 && !command.ignoreFailure) {
+      throw new CliError(`\`${renderCommand(command.argv)}\` failed: ${failure(result)}`);
+    }
+  }
+}
+
+/** Restarts the service when one is installed; returns whether it did. */
+export async function restartInstalledService(env: CliEnv): Promise<boolean> {
+  const paths = servicePaths(env.home);
+  const installed =
+    (env.platform === "linux" && existsSync(paths.unit)) || (env.platform === "darwin" && existsSync(paths.plist));
+  if (!installed) return false;
+  if (env.platform === "darwin") {
+    // kickstart -k restarts a loaded agent in place; only an agent that is not loaded needs bootstrapping.
+    const kick = await env.run(["launchctl", "kickstart", "-k", `gui/${env.uid}/${LAUNCHD_LABEL}`]);
+    if (kick.code === 0) return true;
+  }
+  await runPlanned(env, restartCommands(env, paths.plist));
+  return true;
+}
+
 export async function installService(env: CliEnv, configPath: string): Promise<number> {
   try {
     loadCollectorConfig(configPath, { env: env.env, home: env.home });
@@ -204,12 +241,7 @@ export async function installService(env: CliEnv, configPath: string): Promise<n
   }
   if (env.platform === "darwin") mkdirSync(servicePaths(env.home).logDir, { recursive: true });
 
-  for (const command of plan.commands) {
-    const result = await env.run(command.argv);
-    if (result.code !== 0 && !command.ignoreFailure) {
-      throw new CliError(`\`${renderCommand(command.argv)}\` failed: ${failure(result)}`);
-    }
-  }
+  await runPlanned(env, plan.commands);
   env.out("Service installed and started; it starts again at login.");
   for (const note of plan.notes) env.out(note);
   return 0;
@@ -257,18 +289,57 @@ export async function uninstallService(
   }
 
   const doomed = [configPath];
+  let config: CollectorConfig | null = null;
   try {
-    const config = loadCollectorConfig(configPath, { env: env.env, home: env.home });
-    doomed.push(config.token_file, config.state_file);
+    config = loadCollectorConfig(configPath, { env: env.env, home: env.home });
   } catch (err) {
     warn(`config unreadable, so its token and state files are left alone: ${(err as Error).message.split("\n")[0]}`);
   }
+  if (config) {
+    try {
+      await revokeOwnToken(env, config, warn);
+    } catch (err) {
+      if (env.signal.aborted) throw err;
+      warn(`could not revoke the token (${(err as Error).message.split("\n")[0]}); revoke it on the admin page's Tokens tab.`);
+    }
+    doomed.push(config.token_file, config.state_file);
+  }
   // Only the copy that `install` made is removed; a binary run from elsewhere belongs to the user.
-  doomed.push(paths.binary);
+  doomed.push(paths.binary, paths.log);
   for (const path of doomed) {
     if (!existsSync(path)) continue;
     rmSync(path);
     env.out(`Removed ${path}`);
   }
+  // rmdir refuses a directory that still holds anything, so files the user added survive.
+  for (const dir of [join(env.home, ".config", "retrospecticus"), join(env.home, ".local", "state", "retrospecticus")]) {
+    try {
+      rmdirSync(dir);
+      env.out(`Removed ${dir}`);
+    } catch {
+      // Missing or not empty.
+    }
+  }
   return 0;
+}
+
+/** So a purged machine's token cannot be used from a copy of the file; an unreachable server only costs a warning. */
+async function revokeOwnToken(env: CliEnv, config: CollectorConfig, warn: (message: string) => void): Promise<void> {
+  if (!existsSync(config.token_file)) return;
+  const token = readFileSync(config.token_file, "utf8").trim();
+  try {
+    const res = await env.fetch(config.server_url + TOKEN_REVOKE_SELF_PATH, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, [HEADER_MACHINE]: config.machine },
+      signal: timeoutSignal(env, 10_000),
+    });
+    const result = res.ok ? ((await res.json().catch(() => null)) as { result?: unknown } | null)?.result : undefined;
+    if (result === "revoked" || result === "already-revoked") env.out(`Revoked this machine's token on ${config.server_url}.`);
+    else if (res.ok) warn(`${config.server_url} gave an unexpected answer to revoking the token (is a proxy in the way?); revoke it on the admin page's Tokens tab.`);
+    else if (res.status === 401) env.out("The server no longer accepts this machine's token, so there is nothing to revoke.");
+    else warn(`the server answered HTTP ${res.status} to revoking the token; revoke it on the admin page's Tokens tab.`);
+  } catch (err) {
+    if (env.signal.aborted) throw err;
+    warn(`could not reach ${config.server_url} to revoke the token (${(err as Error).message.split("\n")[0]}); revoke it on the admin page's Tokens tab.`);
+  }
 }

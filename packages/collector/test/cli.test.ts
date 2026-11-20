@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { loadCollectorConfig } from "../src/config.ts";
 import { runCli } from "../src/cli/index.ts";
 import { defaultMachineName } from "../src/cli/enroll.ts";
@@ -400,6 +401,79 @@ describe("uninstall", () => {
     }
   });
 
+  test("--purge revokes the machine's own token first and removes the emptied directories", async () => {
+    const { cli, server } = setup({ platform: "darwin", uid: 501 });
+    await configured(cli, server);
+    await runCli(["install"], cli.env);
+    const paths = servicePaths(cli.home);
+    mkdirSync(paths.logDir, { recursive: true });
+    writeFileSync(paths.log, "log");
+    const stateDir = join(cli.home, ".local/state/retrospecticus");
+    mkdirSync(stateDir, { recursive: true });
+    expect(await runCli(["uninstall", "--purge"], cli.env)).toBe(0);
+    expect(server.revokes).toEqual([{ authorization: "Bearer rt_faketoken123", machine: "testbox" }]);
+    expect(text(cli.out)).toContain("Revoked this machine's token");
+    for (const path of [paths.log, join(cli.home, ".config/retrospecticus"), stateDir]) expect(existsSync(path)).toBe(false);
+  });
+
+  test("--purge leaves a directory that still holds the user's files", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    const keep = join(cli.home, ".config/retrospecticus/notes.txt");
+    writeFileSync(keep, "mine");
+    expect(await runCli(["uninstall", "--purge"], cli.env)).toBe(0);
+    expect(readFileSync(keep, "utf8")).toBe("mine");
+    expect(existsSync(cli.configPath)).toBe(false);
+  });
+
+  test("--purge warns and still cleans up when the server is unreachable", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    const config = loadCollectorConfig(cli.configPath, { home: cli.home, env: {} });
+    server.stop();
+    expect(await runCli(["uninstall", "--purge"], cli.env)).toBe(0);
+    expect(text(cli.err)).toContain("could not reach");
+    expect(text(cli.err)).toContain("revoke the token");
+    expect(existsSync(config.token_file)).toBe(false);
+    expect(existsSync(cli.configPath)).toBe(false);
+  });
+
+  test("--purge warns when the server refuses the revoke, and still cleans up", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    server.revokeStatus = 500;
+    expect(await runCli(["uninstall", "--purge"], cli.env)).toBe(0);
+    expect(text(cli.err)).toContain("HTTP 500");
+    expect(existsSync(cli.configPath)).toBe(false);
+  });
+
+  test("--purge still removes the token and state when reading the token fails", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    const config = loadCollectorConfig(cli.configPath, { home: cli.home, env: {} });
+    chmodSync(config.token_file, 0o000);
+    expect(await runCli(["uninstall", "--purge"], cli.env)).toBe(0);
+    expect(text(cli.err)).toContain("could not revoke the token");
+    expect(text(cli.err)).not.toContain("config unreadable");
+    expect(existsSync(config.token_file)).toBe(false);
+  });
+
+  test("--purge does not claim a revoke from a proxy's 200 page", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    server.proxyPage = true;
+    expect(await runCli(["uninstall", "--purge"], cli.env)).toBe(0);
+    expect(text(cli.out)).not.toContain("Revoked");
+    expect(text(cli.err)).toContain("unexpected answer");
+  });
+
+  test("a plain uninstall does not revoke anything", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    await runCli(["uninstall"], cli.env);
+    expect(server.revokes).toEqual([]);
+  });
+
   test("darwin removes the plist", async () => {
     const { cli, server } = setup({ platform: "darwin", uid: 501 });
     await configured(cli, server);
@@ -492,5 +566,182 @@ describe("dispatch", () => {
     });
     expect(await runCli(["run"], cli.env)).toBe(1);
     expect(cli.err).toEqual(["retrospecticus-collector: Cannot read config file /x; at stack"]);
+  });
+});
+
+describe("update", () => {
+  const NEW_BINARY = "#!/bin/sh\necho new version\n";
+  const sumsFor = (bytes: string, platform = "linux-x64") =>
+    `${createHash("sha256").update(bytes).digest("hex")}  retrospecticus-collector-${platform}\n`;
+
+  async function installed(overrides: Parameters<typeof createCli>[0] = {}) {
+    const { cli, server } = setup(overrides);
+    await configured(cli, server);
+    await runCli(["install"], cli.env);
+    cli.commands.length = 0;
+    cli.out.length = 0;
+    return { cli, server };
+  }
+
+  test("says so when the server runs the same version", async () => {
+    const { cli, server } = await installed();
+    server.version = COLLECTOR_VERSION;
+    const before = readFileSync(servicePaths(cli.home).binary, "utf8");
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(text(cli.out)).toContain("Already up to date");
+    expect(readFileSync(servicePaths(cli.home).binary, "utf8")).toBe(before);
+    expect(cli.commands).toEqual([]);
+  });
+
+  test("downloads, verifies, replaces the binary and restarts the service", async () => {
+    const { cli, server } = await installed();
+    server.version = "9.9.9";
+    server.binary = Buffer.from(NEW_BINARY);
+    server.sums = sumsFor(NEW_BINARY);
+    const token = readFileSync(join(cli.home, ".config/retrospecticus/ingest-token"), "utf8");
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    const { binary } = servicePaths(cli.home);
+    expect(readFileSync(binary, "utf8")).toBe(NEW_BINARY);
+    expect(mode(binary)).toBe(0o755);
+    expect(existsSync(`${binary}.new`)).toBe(false);
+    expect(cli.commands).toEqual([["systemctl", "--user", "restart", "retrospecticus-collector"]]);
+    expect(readFileSync(join(cli.home, ".config/retrospecticus/ingest-token"), "utf8")).toBe(token);
+    expect(server.starts).toHaveLength(1);
+  });
+
+  test("macOS reloads the launchd agent", async () => {
+    const { cli, server } = await installed({ platform: "darwin", arch: "arm64", uid: 501 });
+    server.version = "9.9.9";
+    server.binary = Buffer.from(NEW_BINARY);
+    server.sums = sumsFor(NEW_BINARY, "darwin-arm64");
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(cli.commands.map((c) => c[1])).toEqual(["kickstart"]);
+  });
+
+  test("macOS bootstraps the agent when kickstart finds it not loaded", async () => {
+    const { cli, server } = await installed({ platform: "darwin", arch: "arm64", uid: 501 });
+    server.version = "9.9.9";
+    server.binary = Buffer.from(NEW_BINARY);
+    server.sums = sumsFor(NEW_BINARY, "darwin-arm64");
+    cli.results.set("launchctl kickstart", { code: 113, stdout: "", stderr: "Could not find service" });
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(cli.commands.map((c) => c[1])).toEqual(["kickstart", "bootout", "bootstrap"]);
+  });
+
+  test("a failed restart puts the previous binary back, so a retry updates again", async () => {
+    const { cli, server } = await installed();
+    const { binary } = servicePaths(cli.home);
+    const before = readFileSync(binary, "utf8");
+    server.version = "9.9.9";
+    server.binary = Buffer.from(NEW_BINARY);
+    server.sums = sumsFor(NEW_BINARY);
+    cli.results.set("systemctl --user", { code: 1, stdout: "", stderr: "Failed to connect to bus" });
+    expect(await runCli(["update"], cli.env)).toBe(1);
+    expect(text(cli.err)).toContain("previous binary was put back");
+    expect(readFileSync(binary, "utf8")).toBe(before);
+    expect(existsSync(`${binary}.prev`)).toBe(false);
+    cli.results.delete("systemctl --user");
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(readFileSync(binary, "utf8")).toBe(NEW_BINARY);
+    expect(existsSync(`${binary}.prev`)).toBe(false);
+  });
+
+  test("does not downgrade a collector newer than the server unless forced", async () => {
+    const { cli, server } = await installed();
+    server.version = "0.0.1";
+    server.binary = Buffer.from(NEW_BINARY);
+    server.sums = sumsFor(NEW_BINARY);
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(text(cli.out)).toContain("newer than the server");
+    expect(readFileSync(servicePaths(cli.home).binary, "utf8")).not.toBe(NEW_BINARY);
+    expect(await runCli(["update", "--force"], cli.env)).toBe(0);
+    expect(readFileSync(servicePaths(cli.home).binary, "utf8")).toBe(NEW_BINARY);
+  });
+
+  test("refuses before downloading when SHA256SUMS does not list this platform", async () => {
+    const { cli, server } = await installed();
+    server.version = "9.9.9";
+    server.binary = Buffer.from(NEW_BINARY);
+    server.sums = sumsFor(NEW_BINARY, "darwin-x64");
+    expect(await runCli(["update"], cli.env)).toBe(1);
+    expect(text(cli.err)).toContain("does not list");
+    expect(existsSync(`${servicePaths(cli.home).binary}.new`)).toBe(false);
+  });
+
+  test("without a service it replaces the binary and says nothing was restarted", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    server.version = "9.9.9";
+    server.binary = Buffer.from(NEW_BINARY);
+    server.sums = sumsFor(NEW_BINARY);
+    expect(await runCli(["update"], cli.env)).toBe(0);
+    expect(readFileSync(servicePaths(cli.home).binary, "utf8")).toBe(NEW_BINARY);
+    expect(cli.commands).toEqual([]);
+    expect(text(cli.out)).toContain("No service is installed");
+  });
+
+  test("refuses a download whose checksum does not match, leaving the binary alone", async () => {
+    const { cli, server } = await installed();
+    server.version = "9.9.9";
+    server.binary = Buffer.from("tampered");
+    server.sums = sumsFor(NEW_BINARY);
+    const before = readFileSync(servicePaths(cli.home).binary, "utf8");
+    expect(await runCli(["update"], cli.env)).toBe(1);
+    expect(text(cli.err)).toContain("Checksum mismatch");
+    expect(readFileSync(servicePaths(cli.home).binary, "utf8")).toBe(before);
+    expect(cli.commands).toEqual([]);
+  });
+
+  test("refuses when running from source", async () => {
+    const { cli, server } = setup({ isCompiled: false });
+    await configured(cli, server);
+    server.version = "9.9.9";
+    expect(await runCli(["update"], cli.env)).toBe(1);
+    expect(text(cli.err)).toContain("Running from source");
+    expect(existsSync(servicePaths(cli.home).binary)).toBe(false);
+  });
+
+  test("needs an enrolled config", async () => {
+    const { cli } = setup();
+    expect(await runCli(["update"], cli.env)).toBe(1);
+    expect(text(cli.err)).toContain("enroll");
+  });
+
+  test("--restart-only restarts an installed service without downloading", async () => {
+    const { cli } = await installed();
+    expect(await runCli(["update", "--restart-only"], cli.env)).toBe(0);
+    expect(cli.commands).toEqual([["systemctl", "--user", "restart", "retrospecticus-collector"]]);
+  });
+});
+
+describe("status --enrolled-with", () => {
+  test("succeeds only for the enrolled server with an accepted token", async () => {
+    const { cli, server } = setup();
+    expect(await runCli(["status", "--enrolled-with", server.url], cli.env)).toBe(1);
+    await configured(cli, server);
+    expect(await runCli(["status", "--enrolled-with", `${server.url}/`], cli.env)).toBe(0);
+    expect(await runCli(["status", "--enrolled-with", "http://127.0.0.1:1"], cli.env)).toBe(1);
+    server.whoamiStatus = 502;
+    expect(await runCli(["status", "--enrolled-with", server.url], cli.env)).toBe(3);
+    server.whoamiStatus = 200;
+    server.token = "rt_other";
+    expect(await runCli(["status", "--enrolled-with", server.url], cli.env)).toBe(1);
+    server.stop();
+    expect(await runCli(["status", "--enrolled-with", server.url], cli.env)).toBe(3);
+    expect(cli.out).toEqual([]);
+  });
+
+  test("a proxy's 200 page is not taken for the server accepting the token", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    server.proxyPage = true;
+    expect(await runCli(["status", "--enrolled-with", server.url], cli.env)).toBe(3);
+  });
+
+  test("compares server addresses by origin, so spelling differences still match", async () => {
+    const { cli, server } = setup();
+    await configured(cli, server);
+    const port = new URL(server.url).port;
+    expect(await runCli(["status", "--enrolled-with", `HTTP://127.0.0.1:${port}/`], cli.env)).toBe(0);
   });
 });

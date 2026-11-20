@@ -6,6 +6,7 @@ import { enroll } from "./enroll.ts";
 import { UsageError, type CliEnv } from "./env.ts";
 import { installService, uninstallService } from "./service.ts";
 import { status } from "./status.ts";
+import { enrolledWith, update } from "./update.ts";
 
 const HELP = `retrospecticus-collector [command] [options]
 
@@ -14,6 +15,7 @@ Commands:
   enroll              Register this machine with a server and save its token
   install             Run the collector as a background service
   uninstall           Remove the background service
+  update              Replace this binary with the server's version and restart the service
   status              Show the configuration, service and server state
   version             Print the version
   licenses            Print the licenses of this program and the software it contains
@@ -24,6 +26,7 @@ Options:
   enroll     --server <url> [--machine <name>] [--install | --no-install] [--config <path>] [--force]
   install    [--config <path>]
   uninstall  [--purge] [--config <path>]
+  update     [--config <path>] [--force]
   status     [--config <path>]
 
 The config defaults to $RETROSPECTICUS_COLLECTOR_CONFIG or ~/.config/retrospecticus/collector.json.
@@ -73,9 +76,15 @@ async function dispatch(argv: readonly string[], env: CliEnv): Promise<number> {
       const configPath = resolveCollectorConfigPath(values.config, { env: env.env, home: env.home });
       return uninstallService(env, configPath, { purge: bools.has("purge") });
     }
-    case "status": {
-      const { values, bools } = parseFlags(rest, { values: ["config"] });
+    case "update": {
+      const { values, bools } = parseFlags(rest, { values: ["config"], bools: ["restart-only", "force"] });
       if (bools.has("help")) return help(env);
+      return update(env, { config: values.config, restartOnly: bools.has("restart-only"), force: bools.has("force") });
+    }
+    case "status": {
+      const { values, bools } = parseFlags(rest, { values: ["config", "enrolled-with"] });
+      if (bools.has("help")) return help(env);
+      if (values["enrolled-with"] !== undefined) return enrolledWith(env, values.config, values["enrolled-with"]);
       return status(env, values.config);
     }
     default:

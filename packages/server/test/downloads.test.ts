@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -20,7 +20,7 @@ beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "retrospecticus-downloads-"));
   home = mkdtempSync(join(tmpdir(), "retrospecticus-install-home-"));
   // A stand-in executable that records how it was invoked instead of enrolling.
-  fakeBinary = `#!/bin/sh\necho "fake collector: $*" > "$HOME/invoked"\n`;
+  fakeBinary = `#!/bin/sh\necho "fake collector: $*" >> "$HOME/invoked"\nif [ "$1" = status ]; then [ -e "$HOME/status-code" ] && exit "$(cat "$HOME/status-code")"; [ -e "$HOME/enrolled" ]; exit; fi\n`;
   const sums: string[] = [];
   for (const platform of ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64"]) {
     const name = `retrospecticus-collector-${platform}`;
@@ -77,6 +77,78 @@ describe("collector downloads", () => {
       expect(output).toContain(`enroll --server ${origin}`);
     } finally {
       server.stop(true);
+    }
+  });
+
+  test("install.sh on an already enrolled machine updates and restarts without enrolling", async () => {
+    const enrolledHome = mkdtempSync(join(tmpdir(), "retrospecticus-install-enrolled-"));
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: app.fetch });
+    try {
+      const origin = `http://127.0.0.1:${server.port}`;
+      writeFileSync(join(enrolledHome, "enrolled"), "");
+      writeFileSync(join(enrolledHome, "install.sh"), await (await fetch(`${origin}/install.sh`)).text());
+      const run = await sh(join(enrolledHome, "install.sh"), enrolledHome);
+      expect(run.exitCode).toBe(0);
+      expect(run.stdout).toContain("already enrolled");
+      expect(run.stdout).not.toContain("enroll --server");
+      expect(readFileSync(join(enrolledHome, "invoked"), "utf8").trim().split("\n")).toEqual([
+        `fake collector: status --enrolled-with ${origin}`,
+        "fake collector: update --restart-only",
+      ]);
+      expect(readFileSync(join(enrolledHome, ".local/bin/retrospecticus-collector"), "utf8")).toBe(fakeBinary);
+    } finally {
+      server.stop(true);
+      rmSync(enrolledHome, { recursive: true, force: true });
+    }
+  });
+
+  test("install.sh enrolls when the machine is not enrolled with this server", async () => {
+    const freshHome = mkdtempSync(join(tmpdir(), "retrospecticus-install-fresh-"));
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: app.fetch });
+    try {
+      const origin = `http://127.0.0.1:${server.port}`;
+      writeFileSync(join(freshHome, "install.sh"), await (await fetch(`${origin}/install.sh`)).text());
+      const run = await sh(join(freshHome, "install.sh"), freshHome);
+      expect(run.exitCode).toBe(0);
+      expect(run.stdout).toContain(`enroll --server ${origin}`);
+      expect(readFileSync(join(freshHome, "invoked"), "utf8")).not.toContain("update");
+    } finally {
+      server.stop(true);
+      rmSync(freshHome, { recursive: true, force: true });
+    }
+  });
+
+  test("install.sh enrolls as before when the collector is too old to know the enrolled check", async () => {
+    const legacyHome = mkdtempSync(join(tmpdir(), "retrospecticus-install-legacy-"));
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: app.fetch });
+    try {
+      const origin = `http://127.0.0.1:${server.port}`;
+      writeFileSync(join(legacyHome, "status-code"), "2");
+      writeFileSync(join(legacyHome, "install.sh"), await (await fetch(`${origin}/install.sh`)).text());
+      const run = await sh(join(legacyHome, "install.sh"), legacyHome);
+      expect(run.exitCode).toBe(0);
+      expect(run.stdout).toContain(`enroll --server ${origin}`);
+      expect(readdirSync(join(legacyHome, ".local/bin"))).toEqual(["retrospecticus-collector"]);
+    } finally {
+      server.stop(true);
+      rmSync(legacyHome, { recursive: true, force: true });
+    }
+  });
+
+  test("install.sh stops instead of enrolling again when it cannot tell whether the machine is enrolled", async () => {
+    const unsureHome = mkdtempSync(join(tmpdir(), "retrospecticus-install-unsure-"));
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: app.fetch });
+    try {
+      const origin = `http://127.0.0.1:${server.port}`;
+      writeFileSync(join(unsureHome, "status-code"), "3");
+      writeFileSync(join(unsureHome, "install.sh"), await (await fetch(`${origin}/install.sh`)).text());
+      const run = await sh(join(unsureHome, "install.sh"), unsureHome);
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain("Could not check whether this machine is already enrolled");
+      expect(readFileSync(join(unsureHome, "invoked"), "utf8").trim().split("\n")).toEqual([`fake collector: status --enrolled-with ${origin}`]);
+    } finally {
+      server.stop(true);
+      rmSync(unsureHome, { recursive: true, force: true });
     }
   });
 

@@ -483,7 +483,8 @@ async function deny(request) {
 
 async function loadMachines() {
   let machines;
-  try { machines = (await api("machines")).machines; } catch (err) { return report("machines-msg", err); }
+  let serverVersion = "";
+  try { const res = await api("machines"); machines = res.machines; serverVersion = res.server_version; } catch (err) { return report("machines-msg", err); }
   $("machines").replaceChildren(...machines.map((m) => {
     let sources = [];
     try { sources = JSON.parse(m.sources || "[]"); } catch {}
@@ -491,12 +492,16 @@ async function loadMachines() {
     try { failure = m.last_error ? JSON.parse(m.last_error) : null; } catch {}
     const stale = failure && !(m.last_upload_at && Date.parse(m.last_upload_at) >= Date.parse(failure.at));
     const where = [m.platform, m.hostname].filter(Boolean).join(" · ");
+    const outdated = Boolean(m.outdated && serverVersion);
     return el("li", {}, el("div", { className: "row-main" },
       el("div", { className: "row-title" }, m.machine,
-        el("span", { className: "badge" }, m.active_ingest_tokens + " active token" + (m.active_ingest_tokens === 1 ? "" : "s"))),
+        el("span", { className: "badge" }, m.active_ingest_tokens + " active token" + (m.active_ingest_tokens === 1 ? "" : "s")),
+        m.active_ingest_tokens === 0 ? el("span", { className: "badge" }, "retired") : null,
+        outdated ? el("span", { className: "badge" }, "outdated (" + m.collector_version + ", server " + serverVersion + ")") : null),
       el("div", { className: "row-meta" }, [m.collector_version && "collector " + m.collector_version, where].filter(Boolean).join(" · ")),
       el("div", { className: "row-meta" }, ["heartbeat " + when(m.last_heartbeat_at), "upload " + when(m.last_upload_at),
         "ingest " + when(m.last_ingest_at)].join(" · ")),
+      outdated ? el("div", { className: "warn" }, "Update: run curl -fsSL " + location.origin + "/install.sh | sh, or retrospecticus-collector update, on this machine.") : null,
       sources.length ? el("div", { className: "row-meta" }, sources.map((s) =>
         s.name + ": " + s.files + " files, " + (s.pending_files == null ? "" : s.pending_files + " pending, ") +
         bytes(s.bytes_pending) + " unsent").join(" · ")) : null,

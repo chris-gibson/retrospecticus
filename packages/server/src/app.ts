@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { HEARTBEAT_PATH, INGEST_APPEND_PATH, MCP_PATH, SEARCH_PATH, VERSION } from "@retrospecticus/shared";
+import { HEARTBEAT_PATH, INGEST_APPEND_PATH, MCP_PATH, SEARCH_PATH, TOKEN_REVOKE_SELF_PATH, TOKEN_WHOAMI_PATH, VERSION } from "@retrospecticus/shared";
 import { registerAdminRoutes } from "./admin/routes.ts";
 import type { AdminDeps } from "./admin/routes.ts";
 import type { SetupState } from "./admin/setup.ts";
@@ -11,6 +11,8 @@ import { registerDownloadRoutes } from "./downloads.ts";
 import { registerEnrollRoutes } from "./enroll.ts";
 import { appendHandler } from "./ingest/append.ts";
 import { heartbeatHandler } from "./ingest/heartbeat.ts";
+import { revokeToken } from "./db/tokens.ts";
+import { events } from "./events.ts";
 import { handleMcpRequest } from "./mcp/server.ts";
 import { HttpSearchInputSchema, runSearch } from "./mcp/tools.ts";
 import type { VectorSearch } from "./search/index.ts";
@@ -66,6 +68,13 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   });
   app.put(INGEST_APPEND_PATH, requireScope("ingest"), appendHandler(deps));
   app.post(HEARTBEAT_PATH, requireScope("ingest"), heartbeatHandler(deps));
+  app.get(TOKEN_WHOAMI_PATH, requireScope("ingest"), (c) => c.json({ machine: c.get("token").machine }));
+  app.post(TOKEN_REVOKE_SELF_PATH, requireScope("ingest"), (c) => {
+    const result = revokeToken(deps.db, c.get("token").id);
+    events.publish("tokens");
+    events.publish("machines");
+    return c.json({ result });
+  });
   app.all(MCP_PATH, requireScope("search"), (c) =>
     handleMcpRequest(c.req.raw, { db: deps.db, tokenId: c.get("token").id, vectorSearch: deps.vectorSearch, weights: weights() }),
   );

@@ -233,6 +233,8 @@ The server fetches the collector from this repository's public GitHub releases o
    Waiting for approval...
    ```
 
+   Run the same command on an enrolled machine to update it; it skips enrollment.
+
 2. **Approve it.** On the admin page's **Machines** tab, type the code under **Add a machine** (the request also appears there live, with **Deny** if you don't recognise it). Check it matches the one on the new machine; the page also shows each request's hostname, platform and IP. The collector receives its ingest token and writes `~/.config/retrospecticus/ingest-token` (mode 600) and `~/.config/retrospecticus/collector.json`. No token is copied by hand.
 
 3. **Install the service.** Enroll asks whether to run the collector in the background at login. Yes installs a systemd user unit (Linux) or a launchd agent (Mac) and starts it; the first run uploads all existing history. No prints the exact files and commands so you can do it by hand. `--install` or `--no-install` answers without asking. On Linux, run `loginctl enable-linger $USER` to keep it running while you are logged out.
@@ -248,9 +250,14 @@ Other collector commands:
 ```sh
 retrospecticus-collector status       # config, service, server reachability, status page
 retrospecticus-collector install      # (re)install the service for the current config
-retrospecticus-collector uninstall    # stop and remove the service; --purge also removes config, token and state
+retrospecticus-collector update       # replace this binary with the server's version and restart the service
+retrospecticus-collector uninstall    # stop and remove the service; --purge also revokes the token and removes config, token and state
 retrospecticus-collector run          # run in the foreground
 ```
+
+`update` asks the server for its version and does nothing when the collector is already at it or newer (`--force` installs the server's version anyway). Otherwise it downloads this platform's collector from the server, checks it against `SHA256SUMS`, replaces `~/.local/bin/retrospecticus-collector` and restarts the service. The config and token stay as they are. It refuses to run from source. Rerunning the install command always installs the server's version, without that check, then restarts the service instead of enrolling when the config points at this server and the server still accepts its token. If the server cannot be asked, the script stops rather than enroll a second time. The Machines tab marks a collector older than the server as outdated.
+
+`uninstall --purge` first asks the server to revoke this machine's own token (with a warning, and carrying on, if the server is unreachable), then removes the config, token, state, the installed binary, the macOS log, and `~/.config/retrospecticus` and `~/.local/state/retrospecticus` when they are left empty. Sessions already uploaded stay on the server, and the machine shows as retired on the Machines tab once it has no other active ingest token.
 
 Enrolling again (for example with a new server address) updates the existing config in place and restarts the service. It issues a new ingest token without revoking the old one; revoke that on the admin page.
 
@@ -459,7 +466,8 @@ The config defaults to `$RETROSPECTICUS_COLLECTOR_CONFIG`, then `~/.config/retro
 | `run [--config <path>]` | Uploads transcripts until stopped (the default command; what the service runs). |
 | `enroll --server <url> [--machine <name>] [--install \| --no-install] [--config <path>] [--force]` | Registers this machine; you approve it on the admin page. Offers to install the service. |
 | `install [--config <path>]` | Installs and starts the background service (systemd user unit or launchd agent). |
-| `uninstall [--purge] [--config <path>]` | Removes the service; `--purge` also removes config, token, state and the installed binary. |
+| `update [--config <path>] [--force]` | Replaces the installed binary with the server's version (checksum verified) and restarts the service; no new token. Never downgrades without `--force`. |
+| `uninstall [--purge] [--config <path>]` | Removes the service; `--purge` also revokes this machine's token on the server and removes config, token, state, log, the installed binary and the emptied directories. |
 | `status [--config <path>]` | Shows the config, service state, server reachability and the local status page. |
 | `version` | Prints the version. |
 | `licenses` | Prints the licenses of the collector and the third-party software it contains. |
